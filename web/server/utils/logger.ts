@@ -1,48 +1,101 @@
-import { createClient } from '@supabase/supabase-js'
-import type { H3Event } from 'h3'
+import type { H3Error, H3Event } from 'h3'
 
 const MESSAGE_MAX = 500
+const DETAIL_MAX = 300
 const STACK_MAX = 1500
 
-/**
- * Catat error tak terduga ke console (Vercel logs) dan seru24.system_logs.
- * Client hanya menerima log_id, tanpa detail internal (OWASP ASVS V7.4.1).
- */
-export const logServerError = async (event: H3Event, error: unknown): Promise<string> => {
-  const logId = crypto.randomUUID()
-  const err = error instanceof Error ? error : new Error(String(error))
-  const path = event.path.split('?')[0]
-  const message = `${event.method} ${path}: ${err.message}`.slice(0, MESSAGE_MAX)
-  console.error(`[seru24] log_id=${logId} ${message}`, err.stack)
+type LogChannel = 'auth' | 'server'
 
-  const config = useRuntimeConfig(event)
-  if (!config.public.supabaseUrl || !config.supabaseServiceRoleKey) return logId
-
-  const { error: writeError } = await createClient(config.public.supabaseUrl, config.supabaseServiceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  })
-    .rpc('seru24_server_log', {
-      p_level: 'error',
-      p_event: 'server_error',
-      p_message: message,
-      p_context: { log_id: logId, stack: err.stack?.slice(0, STACK_MAX) ?? null },
-      p_status: 500,
-      p_ip: getRequestIP(event, { xForwardedFor: true }) ?? null,
-      p_user_agent: getRequestHeader(event, 'user-agent') ?? null,
-    })
-    .then((res) => res, (e: unknown) => ({ error: e as Error }))
-  if (writeError) console.error(`[seru24] log_id=${logId} gagal menulis system_logs: ${writeError.message}`)
-  return logId
+interface LogEntry {
+  level: 'info' | 'warning' | 'error'
+  channel: LogChannel
+  event: string
+  message: string
+  status: number
+  context: Record<string, unknown>
+  userId?: string
 }
 
-/** defineEventHandler + error 5xx dicatat dan diganti pesan generik berisi log_id. */
-export const defineLoggedHandler = <T>(handler: (event: H3Event) => Promise<T>) =>
+/**
+ * Tulis ke console (Vercel logs) dan seru24.system_logs lewat RPC khusus service_role.
+ * Tanpa password, token, atau isi body permintaan (OWASP ASVS V7.1.1).
+ */
+const writeLog = async (event: H3Event, entry: LogEntry) => {
+  const line = `[seru24] ${entry.level} ${entry.channel}.${entry.event} ${entry.message} ${JSON.stringify(entry.context)}`
+  if (entry.level === 'error') console.error(line)
+  else console.warn(line)
+
+  const client = serviceClient(event)
+  if (!client) return
+
+  const { error } = await client
+    .rpc('seru24_server_log', {
+      p_level: entry.level,
+      p_event: entry.event,
+      p_message: entry.message.slice(0, MESSAGE_MAX),
+      p_context: entry.context,
+      p_status: entry.status,
+      p_ip: getRequestIP(event, { xForwardedFor: true }) ?? null,
+      p_user_agent: getRequestHeader(event, 'user-agent') ?? null,
+      p_channel: entry.channel,
+      p_user: entry.userId ?? null,
+    })
+    .then((res) => res, (e: unknown) => ({ error: e as Error }))
+  if (error) console.error(`[seru24] gagal menulis system_logs: ${error.message}`)
+}
+
+const routeOf = (event: H3Event) => `${event.method} ${event.path.split('?')[0]}`
+
+const causeMessage = (error: H3Error) =>
+  error.cause instanceof Error ? error.cause.message.slice(0, DETAIL_MAX) : null
+
+/** Keputusan autentikasi yang berhasil (OWASP ASVS V7.2.1), mis. login_success. */
+export const logAuthSuccess = (event: H3Event, code: string, userId: string, message: string) =>
+  writeLog(event, { level: 'info', channel: 'auth', event: code, message, status: 200, context: {}, userId })
+
+export interface LoggedHandlerOptions {
+  /** event_code untuk permintaan yang ditolak (4xx); false = tidak dicatat. */
+  rejectedEvent?: string | false
+  channel?: LogChannel
+}
+
+/**
+ * defineEventHandler + pencatatan:
+ *  - 4xx: dicatat sebagai warning (mis. login_failed) beserta alasan asli, lalu diteruskan apa adanya.
+ *  - 5xx/error tak terduga: dicatat sebagai error, client hanya menerima log_id.
+ */
+export const defineLoggedHandler = <T>(
+  handler: (event: H3Event) => Promise<T>,
+  options: LoggedHandlerOptions = {},
+) =>
   defineEventHandler(async (event) => {
     try {
       return await handler(event)
     } catch (error) {
-      if (isError(error) && error.statusCode < 500) throw error
-      const logId = await logServerError(event, error)
+      if (isError(error) && error.statusCode < 500) {
+        if (options.rejectedEvent !== false) {
+          await writeLog(event, {
+            level: 'warning',
+            channel: options.channel ?? 'server',
+            event: options.rejectedEvent ?? 'request_rejected',
+            message: `${routeOf(event)}: ${error.statusMessage ?? 'ditolak'}`,
+            status: error.statusCode,
+            context: { reason: causeMessage(error) },
+          })
+        }
+        throw error
+      }
+
+      const logId = crypto.randomUUID()
+      const err = error instanceof Error ? error : new Error(String(error))
+      await writeLog(event, {
+        level: 'error',
+        channel: 'server',
+        event: 'server_error',
+        message: `${routeOf(event)}: ${err.message}`,
+        status: 500,
+        context: { log_id: logId, stack: err.stack?.slice(0, STACK_MAX) ?? null },
+      })
       throw createError({ statusCode: 500, statusMessage: 'Terjadi kesalahan server', data: { log_id: logId } })
     }
   })

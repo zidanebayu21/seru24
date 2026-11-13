@@ -51,8 +51,9 @@ export const getAccessToken = async (): Promise<string | null> => {
   return (await refreshSession()) ? accessToken : null
 }
 
-export const loginWithPassword = async (email: string, password: string) => {
-  applySession(await $fetch<SessionResponse>('/api/auth/login', { method: 'POST', body: { email, password } }))
+/** identifier = email atau username. */
+export const loginWithPassword = async (identifier: string, password: string) => {
+  applySession(await $fetch<SessionResponse>('/api/auth/login', { method: 'POST', body: { identifier, password } }))
 }
 
 export const registerAccount = async (input: RegisterInput) => {

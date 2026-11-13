@@ -8,7 +8,6 @@ const REFRESH_MAX_AGE = 60 * 60 * 24 * 30
 
 const EMAIL_PATTERN = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,63}$/
 const USERNAME_PATTERN = /^[a-z0-9_]{3,30}$/
-const PASSWORD_MIN = 12
 const PASSWORD_MAX = 128
 
 export interface SessionResponse {
@@ -27,6 +26,30 @@ export const authClient = (event: H3Event) => {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
     global: { headers: forwardedFor ? { 'x-forwarded-for': forwardedFor } : {} },
   })
+}
+
+/** Klien service_role untuk RPC khusus server; null bila kunci belum diisi. Tidak pernah dipakai di browser. */
+export const serviceClient = (event: H3Event) => {
+  const config = useRuntimeConfig(event)
+  if (!config.public.supabaseUrl || !config.supabaseServiceRoleKey) return null
+  return createClient(config.public.supabaseUrl, config.supabaseServiceRoleKey, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  })
+}
+
+/**
+ * Login boleh memakai email atau username. Username diterjemahkan ke email di server;
+ * tidak ditemukan = null, dan pemanggil menjawab sama seperti password salah (OWASP ASVS V2.2).
+ */
+export const resolveLoginEmail = async (event: H3Event, value: unknown): Promise<string | null> => {
+  const identifier = text(value, 254).trim().toLowerCase()
+  if (identifier.includes('@')) return parseEmail(identifier)
+  if (!USERNAME_PATTERN.test(identifier)) throw badRequest()
+  const client = serviceClient(event)
+  if (!client) throw new Error('Konfigurasi belum lengkap: NUXT_SUPABASE_SERVICE_ROLE_KEY kosong')
+  const { data, error } = await client.rpc('seru24_login_email', { p_username: identifier })
+  if (error) throw new Error(`seru24_login_email gagal: ${error.message}`)
+  return typeof data === 'string' ? data : null
 }
 
 /** Tolak permintaan lintas situs ke endpoint yang memakai cookie (CSRF, OWASP ASVS V4.2.2). */
@@ -69,9 +92,9 @@ export const parseEmail = (value: unknown) => {
   return email
 }
 
-export const parsePassword = (value: unknown) => {
+export const parsePassword = (event: H3Event, value: unknown) => {
   const password = text(value, PASSWORD_MAX)
-  if (password.length < PASSWORD_MIN) throw badRequest()
+  if (password.length < Number(useRuntimeConfig(event).public.passwordMinLength)) throw badRequest()
   return password
 }
 

@@ -37,8 +37,6 @@ const submit = async () => {
   } catch {
     error.value = 'Gagal menyiapkan kunci. Muat ulang halaman lalu coba lagi.'
   } finally {
-    code.value = ''
-    confirm.value = ''
     busy.value = false
   }
 }

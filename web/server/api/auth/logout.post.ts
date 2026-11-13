@@ -8,4 +8,4 @@ export default defineLoggedHandler(async (event) => {
   }
   clearRefreshCookie(event)
   return { ok: true }
-})
+}, { channel: 'auth' })

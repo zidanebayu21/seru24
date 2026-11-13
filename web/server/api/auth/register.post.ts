@@ -2,7 +2,7 @@ export default defineLoggedHandler(async (event) => {
   assertSameOrigin(event)
   const body = await readBody(event)
   const email = parseEmail(body?.email)
-  const password = parsePassword(body?.password)
+  const password = parsePassword(event, body?.password)
   const username = parseUsername(body?.username)
   const displayName = parseDisplayName(body?.display_name)
 
@@ -15,10 +15,14 @@ export default defineLoggedHandler(async (event) => {
     },
   })
   if (error) {
-    throw createError({ statusCode: 400, statusMessage: 'Pendaftaran gagal. Periksa data atau coba username lain.' })
+    // alasan asli (mis. username bentrok, email gagal dikirim) hanya masuk log, tidak ke client
+    throw createError({ statusCode: 400, statusMessage: 'Pendaftaran gagal. Periksa data atau coba username lain.', cause: error })
+  }
+  if (data.user) {
+    await logAuthSuccess(event, 'register_success', data.user.id, `Pendaftaran berhasil (@${username})`)
   }
   if (data.session) {
     return { status: 'active', ...issueSession(event, data.session) }
   }
   return { status: 'verify_email' }
-})
+}, { rejectedEvent: 'register_rejected', channel: 'auth' })

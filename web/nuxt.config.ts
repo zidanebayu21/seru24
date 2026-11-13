@@ -21,6 +21,8 @@
     public: {
       supabaseUrl: '',
       supabaseAnonKey: '',
+      // OWASP ASVS V2.1.1 mensyaratkan minimal 12; NUXT_PUBLIC_PASSWORD_MIN_LENGTH hanya untuk masa uji
+      passwordMinLength: 12,
     },
   },
 

@@ -6,6 +6,7 @@ const done = ref(false)
 const busy = ref(false)
 
 const USERNAME_PATTERN = /^[a-z0-9_]{3,30}$/
+const passwordMin = Number(useRuntimeConfig().public.passwordMinLength)
 
 const checkUsername = async () => {
   form.username = form.username.trim().toLowerCase()
@@ -23,9 +24,10 @@ const checkUsername = async () => {
 }
 
 const validate = () => {
+  if (form.username.includes('@')) return 'Username bukan email. Contoh: zidane_21'
   if (!USERNAME_PATTERN.test(form.username)) return 'Username 3-30 karakter: huruf kecil, angka, atau _'
   if (usernameState.value === 'taken') return 'Username sudah dipakai'
-  if (form.password.length < 12) return 'Password minimal 12 karakter'
+  if (form.password.length < passwordMin) return `Password minimal ${passwordMin} karakter`
   if (form.password !== form.confirm) return 'Konfirmasi password tidak sama'
   return ''
 }
@@ -50,8 +52,6 @@ const submit = async () => {
   } catch (e) {
     error.value = errorMessage(e, 'Pendaftaran gagal. Coba lagi.')
   } finally {
-    form.password = ''
-    form.confirm = ''
     busy.value = false
   }
 }
@@ -67,15 +67,26 @@ const submit = async () => {
         <input v-model="form.email" type="email" autocomplete="email" required maxlength="254">
       </label>
       <label>Username
-        <input v-model="form.username" autocomplete="username" required maxlength="30" @blur="checkUsername">
+        <!-- autocomplete="nickname": cegah Chrome mengisi email ke kolom ini -->
+        <input
+          v-model="form.username"
+          name="seru24-handle"
+          autocomplete="nickname"
+          autocapitalize="none"
+          spellcheck="false"
+          placeholder="mis. zidane_21"
+          required
+          maxlength="30"
+          @blur="checkUsername"
+        >
         <span v-if="usernameState === 'available'" class="muted">Username tersedia</span>
         <span v-else-if="usernameState === 'taken'" class="error">Username sudah dipakai</span>
       </label>
       <label>Nama tampil
         <input v-model="form.display_name" autocomplete="name" maxlength="50">
       </label>
-      <label>Password (minimal 12 karakter)
-        <input v-model="form.password" type="password" autocomplete="new-password" required minlength="12" maxlength="128">
+      <label>Password (minimal {{ passwordMin }} karakter)
+        <input v-model="form.password" type="password" autocomplete="new-password" required :minlength="passwordMin" maxlength="128">
       </label>
       <label>Ulangi password
         <input v-model="form.confirm" type="password" autocomplete="new-password" required maxlength="128">

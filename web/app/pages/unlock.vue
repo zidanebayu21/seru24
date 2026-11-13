@@ -30,7 +30,6 @@ const submit = async () => {
   } catch {
     error.value = 'Gagal membuka kunci. Coba lagi.'
   } finally {
-    code.value = ''
     busy.value = false
   }
 }

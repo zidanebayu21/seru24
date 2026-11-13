@@ -12,4 +12,7 @@ export default defineLoggedHandler(async (event) => {
     throw createError({ statusCode: 401, statusMessage: 'Sesi berakhir' })
   }
   return issueSession(event, data.session)
+}, {
+  // 401 tanpa cookie terjadi di setiap kunjungan pengguna yang belum login; tidak dicatat agar log tidak penuh
+  rejectedEvent: false,
 })
