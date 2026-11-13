@@ -36,6 +36,19 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKey)
 })
 
+const notifyHint = ref('')
+
+const toggleNotifications = async () => {
+  notifyHint.value = ''
+  if (notifyState.enabled) {
+    disableNotifications()
+    return
+  }
+  if (!(await enableNotifications())) {
+    notifyHint.value = 'Izin notifikasi diblokir. Aktifkan lewat ikon gembok di address bar browser.'
+  }
+}
+
 const logout = async () => {
   close()
   await signOut()
@@ -63,6 +76,18 @@ const logout = async () => {
       </div>
       <NuxtLink to="/akun/profil" role="menuitem" @click="close">Edit profil</NuxtLink>
       <NuxtLink to="/akun/password" role="menuitem" @click="close">Ganti password</NuxtLink>
+      <button
+        v-if="notifyState.supported"
+        type="button"
+        role="menuitemcheckbox"
+        class="toggle"
+        :aria-checked="notifyState.enabled"
+        @click="toggleNotifications"
+      >
+        <span>Notifikasi</span>
+        <span class="switch" :class="{ on: notifyState.enabled }" aria-hidden="true" />
+      </button>
+      <p v-if="notifyHint" class="hint">{{ notifyHint }}</p>
       <button type="button" role="menuitem" class="danger" @click="logout">Keluar</button>
     </div>
   </div>
@@ -111,4 +136,27 @@ const logout = async () => {
 }
 .menu a:hover, .menu button:hover { background: var(--bg); }
 .menu .danger { color: var(--danger); }
+.menu .toggle { display: flex; justify-content: space-between; align-items: center; }
+.switch {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--border);
+  transition: background .15s;
+}
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform .15s;
+}
+.switch.on { background: var(--accent); }
+.switch.on::after { transform: translateX(14px); }
+.hint { margin: 0; padding: 4px 10px 8px; font-size: 12px; color: var(--danger); }
 </style>
