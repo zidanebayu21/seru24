@@ -1,4 +1,4 @@
-export default defineEventHandler(async (event) => {
+export default defineLoggedHandler(async (event) => {
   assertSameOrigin(event)
   const body = await readBody(event)
   const email = parseEmail(body?.email)

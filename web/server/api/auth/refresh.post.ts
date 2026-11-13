@@ -1,4 +1,4 @@
-export default defineEventHandler(async (event) => {
+export default defineLoggedHandler(async (event) => {
   assertSameOrigin(event)
   const refreshToken = readRefreshToken(event)
   if (!refreshToken) {
