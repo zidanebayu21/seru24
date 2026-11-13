@@ -1,0 +1,44 @@
+﻿# dependencies
+node_modules/
+
+# secrets (jangan pernah di-commit; pakai .env.example sebagai template)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.jks
+*.p8
+*.p12
+*.mobileprovision
+
+# Nuxt / web
+web/.nuxt/
+web/.output/
+web/.nitro/
+web/.cache/
+web/dist/
+
+# Expo / React Native
+mobile/.expo/
+mobile/dist/
+mobile/web-build/
+mobile/android/
+mobile/ios/
+*.orig.*
+
+# Vercel
+.vercel/
+
+# Supabase lokal
+supabase/.branches/
+supabase/.temp/
+
+# logs & OS & editor
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
