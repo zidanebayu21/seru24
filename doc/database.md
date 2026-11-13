@@ -257,7 +257,7 @@ Kenapa tabel sendiri dan bukan kolom di `profiles`: satu akun dipakai di web dan
 
 Cara kerja:
 
-- Mobile: nilai acak 32 byte dibuat saat instalasi, disimpan di `expo-secure-store`. Web: sidik jari browser (FingerprintJS) di-hash SHA-512, dihitung ulang tiap buka, tidak disimpan (pola gaspro).
+- Mobile: nilai acak 32 byte dibuat saat instalasi, disimpan di `expo-secure-store`. Web: nilai acak 32 byte di `localStorage` (bukan sidik jari browser seperti gaspro: tanpa library pihak ketiga dan tidak mengumpulkan ciri perangkat).
 - Setelah login, client memanggil RPC `register_device()`; fungsi membaca header lewat `current_setting('request.headers')`. Visitor key yang belum dikenal dicatat `new_device` di `system_logs` dan pemilik diberi notifikasi.
 - RPC sensitif (`send_message`, `start_direct_chat`, akses `key_backups`) menolak bila visitor key tidak terdaftar atau `revoked_at` terisi.
 - Ini **lapisan tambahan** (mengikat sesi ke perangkat, ASVS V3), bukan pengganti JWT: header dikirim client sehingga bisa ditiru bila nilainya bocor. Karena itu hanya hash yang disimpan dan nilainya tidak pernah ditulis ke log.

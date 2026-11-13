@@ -1,0 +1,93 @@
+:root {
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --text: #1c1f24;
+  --muted: #646b75;
+  --border: #dde1e6;
+  --accent: #0f766e;
+  --accent-text: #ffffff;
+  --mine: #d9f2ee;
+  --theirs: #ffffff;
+  --danger: #b42318;
+  --warn-bg: #fff4d6;
+  --radius: 12px;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1215;
+    --surface: #181c21;
+    --text: #e7e9ec;
+    --muted: #9aa1aa;
+    --border: #2a3038;
+    --accent: #2dd4bf;
+    --accent-text: #062a26;
+    --mine: #123a35;
+    --theirs: #1f242b;
+    --danger: #f97066;
+    --warn-bg: #3a2f12;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+a { color: var(--accent); }
+
+button, input, select, textarea { font: inherit; color: inherit; }
+
+input, select, textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+input:focus, textarea:focus, select:focus, button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+button {
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+button.danger { color: var(--danger); }
+button:disabled { opacity: .6; cursor: default; }
+
+label { display: grid; gap: 6px; font-size: 14px; color: var(--muted); }
+
+.stack { display: grid; gap: 14px; }
+.row { display: flex; gap: 8px; align-items: center; }
+.muted { color: var(--muted); font-size: 13px; }
+.error { color: var(--danger); font-size: 14px; margin: 0; }
+.notice { background: var(--warn-bg); border-radius: 8px; padding: 10px 12px; font-size: 14px; }
+.badge {
+  min-width: 22px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 12px;
+  text-align: center;
+}
