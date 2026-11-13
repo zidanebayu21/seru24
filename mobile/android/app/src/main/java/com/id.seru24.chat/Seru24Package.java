@@ -5,14 +5,15 @@ import com.facebook.react.bridge.NativeModule;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.uimanager.ViewManager;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
-/** Mendaftarkan ScryptModule ke React Native (didaftarkan manual di MainApplication). */
-public class ScryptPackage implements ReactPackage {
+/** Modul native seru24 (scrypt, notifikasi); didaftarkan manual di MainApplication. */
+public class Seru24Package implements ReactPackage {
     @Override
     public List<NativeModule> createNativeModules(ReactApplicationContext context) {
-        return Collections.singletonList(new ScryptModule(context));
+        return Arrays.asList(new ScryptModule(context), new NotifyModule(context));
     }
 
     @Override

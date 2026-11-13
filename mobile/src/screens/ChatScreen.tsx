@@ -1,9 +1,21 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { BackHandler, FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, BackHandler, FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { MAX_TEXT_LENGTH } from '../../../web/shared/crypto';
-import { SEND_ERRORS, formatTime, isIncomingRequest, peerLabel, type Conversation, type SendResult } from '../../../web/shared/chat-core';
+import {
+  CHAT_MOBILE_PREFETCH_SCREENS,
+  CHAT_PAGE_SIZE,
+  SEND_ERRORS,
+  formatTime,
+  isIncomingRequest,
+  mergePagedBubbles,
+  oldestPersistedSeq,
+  peerLabel,
+  type Conversation,
+  type SendResult,
+} from '../../../web/shared/chat-core';
 import type { ChatMessage, PeerKeyStatus } from '../../../web/shared/e2ee-core';
 import { account, e2ee, inbox, rpc } from '../lib/core';
+import { notifyMessageSent } from '../lib/notify';
 import { Button } from '../components/Button';
 import { colors, ui } from '../theme';
 
@@ -24,20 +36,27 @@ interface Props {
   onBack: () => void;
 }
 
-const PAGE = 50;
-
-const sortBubbles = (list: Bubble[]) =>
-  [...list].sort((a, b) => (a.pending ? Infinity : a.seq) - (b.pending ? Infinity : b.seq));
-
 export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
   const [conversation, setConversation] = useState(initial);
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [keyStatus, setKeyStatus] = useState<PeerKeyStatus>({ status: 'missing' });
   const [peerReadSeq, setPeerReadSeq] = useState(0);
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
   const listRef = useRef<FlatList<Bubble>>(null);
+  const bubblesRef = useRef<Bubble[]>([]);
+  const hasOlderRef = useRef(false);
+  const loadingOlderRef = useRef(false);
   const peerId = conversation.peer_id;
+
+  const updateBubbles = useCallback((updater: (prev: Bubble[]) => Bubble[]) => {
+    setBubbles(prev => {
+      const next = updater(prev);
+      bubblesRef.current = next;
+      return next;
+    });
+  }, []);
 
   const toBubble = useCallback(async (m: ChatMessage): Promise<Bubble> => ({
     key: m.client_msg_id,
@@ -68,10 +87,14 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     (async () => {
       try {
         setKeyStatus(await e2ee.checkPeerKey(peerId));
-        const rows = await rpc<ChatMessage[]>('seru24_get_messages', { p_conversation_id: conversation.id, p_limit: PAGE });
+        const rows = await rpc<ChatMessage[]>('seru24_get_messages', {
+          p_conversation_id: conversation.id,
+          p_limit: CHAT_PAGE_SIZE,
+        });
         const list = await Promise.all(rows.reverse().map(toBubble));
         if (!alive) return;
-        setBubbles(list);
+        hasOlderRef.current = rows.length === CHAT_PAGE_SIZE;
+        updateBubbles(() => list);
         markRead(list.at(-1)?.seq ?? 0);
       } catch {
         if (alive) setError('Gagal memuat percakapan');
@@ -85,7 +108,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         return;
       }
       const bubble = await toBubble(payload as unknown as ChatMessage);
-      setBubbles(list => sortBubbles([...list.filter(b => b.key !== bubble.key), bubble]));
+      updateBubbles(list => mergePagedBubbles([bubble], list));
       if (event === 'message_new') {
         // balasan pertama dari lawan bicara = permintaan chat kita diterima
         setConversation(c => (c.status === 'pending' && payload.sender_id === c.peer_id ? { ...c, status: 'accepted' } : c));
@@ -96,10 +119,36 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
       alive = false;
       stop();
     };
-  }, [conversation.id, peerId, toBubble, markRead]);
+  }, [conversation.id, peerId, toBubble, markRead, updateBubbles]);
+
+  const loadOlder = useCallback(async () => {
+    if (!hasOlderRef.current || loadingOlderRef.current) return;
+    const beforeSeq = oldestPersistedSeq(bubblesRef.current);
+    if (beforeSeq === null) {
+      hasOlderRef.current = false;
+      return;
+    }
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    try {
+      const rows = await rpc<ChatMessage[]>('seru24_get_messages', {
+        p_conversation_id: conversation.id,
+        p_before_seq: beforeSeq,
+        p_limit: CHAT_PAGE_SIZE,
+      });
+      const older = await Promise.all(rows.reverse().map(toBubble));
+      hasOlderRef.current = rows.length === CHAT_PAGE_SIZE;
+      updateBubbles(curr => mergePagedBubbles(older, curr));
+    } catch {
+      // biarkan pengguna bisa coba scroll lagi saat jaringan pulih
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }, [conversation.id, toBubble, updateBubbles]);
 
   const updateBubble = (key: string, patch: Partial<Bubble>) =>
-    setBubbles(list => sortBubbles(list.map(b => (b.key === key ? { ...b, ...patch } : b))));
+    updateBubbles(list => mergePagedBubbles([], list.map(b => (b.key === key ? { ...b, ...patch } : b))));
 
   const sendText = async (text: string, localKey: string, retry = false): Promise<void> => {
     const params = await e2ee.encryptText(conversation.id, peerId, text, retry);
@@ -107,6 +156,9 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     const result = await rpc<SendResult>('seru24_send_message', params);
     if (result.ok) {
       updateBubble(params.p_client_msg_id, { id: result.id ?? null, seq: result.seq ?? 0, pending: false });
+      if (result.id && result.code !== 'duplicate') {
+        notifyMessageSent(conversation.id, result.id);
+      }
       return;
     }
     if (result.code === 'stale_key' && !retry) {
@@ -122,15 +174,16 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     setDraft('');
     setError('');
     const localKey = `local-${Date.now()}`;
-    setBubbles(list => [...list, {
+    updateBubbles(list => [...list, {
       key: localKey, id: null, seq: 0, mine: true, text, createdAt: new Date().toISOString(),
       deleted: false, pending: true, failed: '',
     }]);
+    listRef.current?.scrollToOffset({ offset: 0, animated: true });
     try {
       await sendText(text, localKey);
       if (isIncomingRequest(conversation, account.me?.id)) setConversation(c => ({ ...c, status: 'accepted' }));
     } catch (e) {
-      setBubbles(list => list.map(b => (b.pending && b.text === text ? { ...b, pending: false, failed: e instanceof Error ? e.message : 'Pesan gagal dikirim' } : b)));
+      updateBubbles(list => list.map(b => (b.pending && b.text === text ? { ...b, pending: false, failed: e instanceof Error ? e.message : 'Pesan gagal dikirim' } : b)));
     }
   };
 
@@ -157,6 +210,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
   };
 
   const cannotSend = keyStatus.status === 'missing' || conversation.peer_blocked;
+  const reversedBubbles = useMemo(() => [...bubbles].reverse(), [bubbles]);
 
   return (
     <KeyboardAvoidingView style={ui.screen} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
@@ -197,10 +251,20 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
 
       <FlatList
         ref={listRef}
-        data={bubbles}
+        inverted
+        data={reversedBubbles}
         keyExtractor={b => b.key}
-        contentContainerStyle={{ padding: 16, gap: 6 }}
-        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+        contentContainerStyle={styles.listContent}
+        onEndReached={loadOlder}
+        onEndReachedThreshold={CHAT_MOBILE_PREFETCH_SCREENS}
+        ListFooterComponent={
+          loadingOlder ? (
+            <View style={styles.olderLoader}>
+              <ActivityIndicator size="small" color={colors.accent} />
+              <Text style={ui.muted}>Memuat pesan lama…</Text>
+            </View>
+          ) : null
+        }
         renderItem={({ item }) => (
           <View style={[styles.bubble, item.mine ? styles.mine : styles.theirs, item.failed ? { borderColor: colors.danger } : null]}>
             {item.deleted ? (
@@ -243,6 +307,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   bubble: { maxWidth: '80%', padding: 10, borderRadius: 14, borderWidth: 1, borderColor: colors.border, gap: 2 },
+  listContent: { padding: 16, gap: 6, flexGrow: 1, justifyContent: 'flex-end' },
+  olderLoader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 8 },
   mine: { alignSelf: 'flex-end', backgroundColor: colors.mine },
   theirs: { alignSelf: 'flex-start', backgroundColor: colors.surface },
   composer: {

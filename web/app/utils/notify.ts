@@ -72,3 +72,12 @@ export const stopNotifications = () => {
   unsubscribe?.()
   unsubscribe = null
 }
+
+/** Beri tahu server untuk mengirim push FCM ke HP penerima (best-effort, tidak menahan alur kirim). */
+export const notifyMessageSent = (conversationId: string, messageId: string) => {
+  getAccessToken()
+    .then((token) =>
+      token ? secureFetch('/api/push/notify', { access_token: token, conversation_id: conversationId, message_id: messageId }) : undefined,
+    )
+    .catch(() => undefined)
+}

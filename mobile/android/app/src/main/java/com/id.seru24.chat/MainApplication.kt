@@ -14,8 +14,8 @@ class MainApplication : Application(), ReactApplication {
       context = applicationContext,
       packageList =
         PackageList(this).packages.apply {
-          // scrypt native untuk turunan password (lihat ScryptModule)
-          add(ScryptPackage())
+          // modul native seru24: scrypt dan notifikasi (lihat Seru24Package)
+          add(Seru24Package())
         },
     )
   }

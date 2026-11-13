@@ -1,5 +1,11 @@
 <script setup lang="ts">
 import { MAX_TEXT_LENGTH } from '#shared/crypto'
+import {
+  CHAT_PAGE_SIZE,
+  CHAT_PREFETCH_OFFSET,
+  mergePagedBubbles,
+  oldestPersistedSeq,
+} from '#shared/chat-core'
 
 interface Bubble {
   key: string
@@ -29,6 +35,7 @@ const keyStatus = ref<PeerKeyStatus>({ status: 'missing' })
 const draft = ref('')
 const error = ref('')
 const hasOlder = ref(false)
+const loadingOlder = ref(false)
 const showSafety = ref(false)
 const reportReason = ref('')
 const reportDone = ref(false)
@@ -64,7 +71,7 @@ const fetchPage = (beforeSeq?: number) =>
   rpc<ChatMessage[]>('seru24_get_messages', {
     p_conversation_id: conversationId,
     p_before_seq: beforeSeq ?? null,
-    p_limit: 50,
+    p_limit: CHAT_PAGE_SIZE,
   })
 
 const load = async () => {
@@ -76,18 +83,45 @@ const load = async () => {
   }
   keyStatus.value = await checkPeerKey(peerId())
   const rows = await fetchPage()
-  hasOlder.value = rows.length === 50
+  hasOlder.value = rows.length === CHAT_PAGE_SIZE
   bubbles.value = await Promise.all(rows.reverse().map(toBubble))
   await scrollToBottom()
   markRead()
 }
 
 const loadOlder = async () => {
-  const first = bubbles.value.find((b) => !b.pending)
-  if (!first) return
-  const rows = await fetchPage(first.seq)
-  hasOlder.value = rows.length === 50
-  bubbles.value = [...(await Promise.all(rows.reverse().map(toBubble))), ...bubbles.value]
+  if (!hasOlder.value || loadingOlder.value) return
+  const beforeSeq = oldestPersistedSeq(bubbles.value)
+  if (beforeSeq === null) {
+    hasOlder.value = false
+    return
+  }
+  loadingOlder.value = true
+  try {
+    const rows = await fetchPage(beforeSeq)
+    const older = await Promise.all(rows.reverse().map(toBubble))
+    const el = scroller.value
+    const prevHeight = el?.scrollHeight ?? 0
+    const prevTop = el?.scrollTop ?? 0
+    hasOlder.value = rows.length === CHAT_PAGE_SIZE
+    bubbles.value = mergePagedBubbles(older, bubbles.value)
+    await nextTick()
+    if (el) el.scrollTop = prevTop + (el.scrollHeight - prevHeight)
+  } finally {
+    loadingOlder.value = false
+  }
+}
+
+const onMessagesScroll = () => {
+  const el = scroller.value
+  if (!el || !hasOlder.value || loadingOlder.value) return
+  const items = el.querySelectorAll<HTMLElement>('.bubble')
+  if (items.length === 0) return
+  // Trigger saat scroll ke atas melewati sekitar 40 pesan (~10 pesan sebelum pesan paling atas)
+  const anchor = items[Math.min(CHAT_PREFETCH_OFFSET, items.length - 1)]!
+  if (anchor.getBoundingClientRect().bottom >= el.getBoundingClientRect().top) {
+    loadOlder().catch(() => undefined)
+  }
 }
 
 const upsert = async (message: ChatMessage) => {
@@ -126,6 +160,9 @@ const sendText = async (text: string, bubble: Bubble, retry = false): Promise<vo
     bubble.seq = result.seq ?? bubble.seq
     bubble.createdAt = result.created_at ?? bubble.createdAt
     bubble.pending = false
+    if (result.id && result.code !== 'duplicate') {
+      notifyMessageSent(conversationId, result.id)
+    }
     return
   }
   if (result.code === 'stale_key' && !retry) {
@@ -244,8 +281,9 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
       <button type="button" class="danger" @click="toggleBlock">Blokir</button>
     </p>
 
-    <div ref="scroller" class="messages">
-      <button v-if="hasOlder" type="button" class="older" @click="loadOlder">Muat pesan lama</button>
+    <div ref="scroller" class="messages" @scroll.passive="onMessagesScroll">
+      <p v-if="loadingOlder" class="older muted">Memuat pesan lama…</p>
+      <button v-else-if="hasOlder" type="button" class="older" @click="loadOlder">Muat pesan lama</button>
       <div v-for="b in bubbles" :key="b.key" class="bubble" :class="{ mine: b.mine, failed: b.failed }">
         <p v-if="b.deleted" class="muted"><em>Pesan dihapus</em></p>
         <p v-else-if="b.text === null" class="muted"><em>Pesan tidak dapat dibuka</em></p>

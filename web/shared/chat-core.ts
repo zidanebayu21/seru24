@@ -1,5 +1,11 @@
 // Tipe dan helper percakapan bersama web dan mobile.
 
+export const CHAT_PAGE_SIZE = 50
+/** Muat halaman berikutnya saat tersisa ~10 pesan di atas (sekitar 40 pesan di-scroll ke atas dari 50 terbaru). */
+export const CHAT_PREFETCH_OFFSET = 10
+/** FlatList onEndReachedThreshold memakai satuan tinggi layar (~10 pesan/layar = sekitar 40 dari 50 pesan). */
+export const CHAT_MOBILE_PREFETCH_SCREENS = 1
+
 export interface Conversation {
   id: string
   status: 'pending' | 'accepted'
@@ -53,4 +59,27 @@ export const formatTime = (iso: string | null) => {
   return sameDay
     ? date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
     : date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })
+}
+
+export interface PagedBubble {
+  key: string
+  seq: number
+  pending: boolean
+}
+
+/** seq terkecil dari pesan yang sudah tersimpan di server (untuk p_before_seq paginasi). */
+export const oldestPersistedSeq = (items: readonly PagedBubble[]): number | null => {
+  let min: number | null = null
+  for (const item of items) {
+    if (!item.pending && item.seq > 0 && (min === null || item.seq < min)) min = item.seq
+  }
+  return min
+}
+
+/** Gabungkan halaman pesan lama ke daftar yang sudah ada tanpa duplikat key, tetap urut naik. */
+export const mergePagedBubbles = <T extends PagedBubble>(incoming: readonly T[], current: readonly T[]): T[] => {
+  const byKey = new Map<string, T>()
+  for (const item of incoming) byKey.set(item.key, item)
+  for (const item of current) byKey.set(item.key, item)
+  return [...byKey.values()].sort((a, b) => (a.pending ? Infinity : a.seq) - (b.pending ? Infinity : b.seq))
 }

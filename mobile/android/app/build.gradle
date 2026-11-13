@@ -92,8 +92,8 @@ android {
         applicationId "id.seru24.chat"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "1.2"
+        versionCode 3
+        versionName "1.3"
     }
     signingConfigs {
         debug {
@@ -135,10 +135,17 @@ dependencies {
     implementation("com.facebook.react:react-android")
     // scrypt (RFC 7914) untuk ScryptModule; R8 hanya menyisakan kelas yang dipakai
     implementation("org.bouncycastle:bcprov-jdk18on:1.80")
+    // FCM untuk notifikasi push saat aplikasi ditutup penuh
+    implementation(platform("com.google.firebase:firebase-bom:33.10.0"))
+    implementation("com.google.firebase:firebase-messaging")
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")
     } else {
         implementation jscFlavor
     }
+}
+
+if (file("google-services.json").exists()) {
+    apply plugin: "com.google.gms.google-services"
 }

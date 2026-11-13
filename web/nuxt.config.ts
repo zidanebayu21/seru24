@@ -22,6 +22,11 @@
     transportPrivateKey: '',
     // true = daftar tanpa email verifikasi (hanya masa uji, OWASP ASVS V2.1); env NUXT_AUTH_SKIP_EMAIL_CONFIRM
     authSkipEmailConfirm: false,
+    // Kredensial FCM HTTP v1 (Firebase service account) untuk push notification ke HP; isi JSON atau 3 field terpisah.
+    fcmServiceAccountJson: '',
+    fcmProjectId: '',
+    fcmClientEmail: '',
+    fcmPrivateKey: '',
     public: {
       supabaseUrl: '',
       supabaseAnonKey: '',
@@ -35,6 +40,7 @@
     '/**': { ssr: false },
     // Batas percobaan login/daftar per IP (OWASP ASVS V2.2.1). Penyimpanan di memori per instance.
     '/api/auth/**': { security: { rateLimiter: { tokensPerInterval: 10, interval: 60_000 } } },
+    '/api/push/**': { security: { rateLimiter: { tokensPerInterval: 60, interval: 60_000 } } },
   },
 
   // Header keamanan (OWASP ASVS V14.4, V3.4)

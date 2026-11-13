@@ -145,7 +145,16 @@ export const finishSignIn = async () => {
   if ((await accountApi.bootstrapAccount(true)) !== 'ready') throw new Error('Kunci chat tidak bisa dibuka');
 };
 
+const signOutCleanups = new Set<() => Promise<void>>();
+export const onBeforeSignOut = (fn: () => Promise<void>) => {
+  signOutCleanups.add(fn);
+  return () => signOutCleanups.delete(fn);
+};
+
 export const signOut = async () => {
+  for (const cleanup of signOutCleanups) {
+    await cleanup().catch(() => undefined);
+  }
   inbox.closeInbox();
   await accountApi.resetAccount();
   e2ee.resetE2ee();
@@ -153,3 +162,7 @@ export const signOut = async () => {
 };
 
 export const webUrl = (path: string) => `${API_BASE_URL}${path}`;
+
+/** Pengaturan kecil per perangkat (mis. notifikasi), disimpan di Keystore. */
+export const readSetting = (name: string) => readSecure(`seru24.setting.${name}`).catch(() => null);
+export const writeSetting = (name: string, value: string) => writeSecure(`seru24.setting.${name}`, value).catch(() => undefined);

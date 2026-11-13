@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, Modal, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { account, signOut, webUrl } from '../lib/core';
+import { disableNotifications, enableNotifications, isNotifyEnabled, notifySupported } from '../lib/notify';
 import { colors, ui } from '../theme';
 
 interface Props {
@@ -15,7 +16,21 @@ const hueOf = (username: string) => [...username].reduce((sum, ch) => sum + ch.c
 
 export const AccountMenu = ({ onSignedOut }: Props) => {
   const [open, setOpen] = useState(false);
+  const [notify, setNotify] = useState(isNotifyEnabled());
+  const [notifyHint, setNotifyHint] = useState('');
   const me = account.me;
+
+  const toggleNotify = async (on: boolean) => {
+    setNotifyHint('');
+    if (!on) {
+      await disableNotifications();
+      setNotify(false);
+      return;
+    }
+    const granted = await enableNotifications();
+    setNotify(granted);
+    if (!granted) setNotifyHint('Izin notifikasi ditolak. Aktifkan di Pengaturan > Aplikasi > seru24.');
+  };
   const name = me?.display_name || me?.username || '';
 
   const openWeb = (path: string) => {
@@ -47,6 +62,13 @@ export const AccountMenu = ({ onSignedOut }: Props) => {
             </View>
             <MenuItem label="Edit profil" onPress={() => openWeb('/akun/profil')} />
             <MenuItem label="Ganti password" onPress={() => openWeb('/akun/password')} />
+            {notifySupported ? (
+              <View style={[styles.item, styles.toggle]}>
+                <Text style={{ color: colors.text }}>Notifikasi</Text>
+                <Switch value={notify} onValueChange={toggleNotify} trackColor={{ true: colors.accent }} />
+              </View>
+            ) : null}
+            {notifyHint ? <Text style={[ui.error, { fontSize: 12, paddingHorizontal: 10 }]}>{notifyHint}</Text> : null}
             <MenuItem label="Keluar" danger onPress={logout} />
           </View>
         </Pressable>
@@ -68,4 +90,5 @@ const styles = StyleSheet.create({
   menu: { minWidth: 220, backgroundColor: colors.surface, borderRadius: 12, padding: 6, elevation: 6 },
   who: { padding: 10, borderBottomWidth: 1, borderBottomColor: colors.border, marginBottom: 4 },
   item: { paddingVertical: 11, paddingHorizontal: 10, borderRadius: 8 },
+  toggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 },
 });
