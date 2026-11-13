@@ -1,10 +1,4 @@
 <script setup lang="ts">
-interface FoundUser {
-  id: string
-  username: string
-  display_name: string
-}
-
 const conversations = ref<Conversation[]>([])
 const query = ref('')
 const found = ref<FoundUser | null>(null)

@@ -13,22 +13,6 @@ interface Bubble {
   failed: string
 }
 
-interface SendResult {
-  ok: boolean
-  code?: string
-  id?: string
-  seq?: number
-  created_at?: string
-}
-
-const SEND_ERRORS: Record<string, string> = {
-  device_not_registered: 'Perangkat belum terdaftar. Muat ulang halaman.',
-  not_member: 'Percakapan tidak ditemukan.',
-  unavailable: 'Pesan tidak dapat dikirim.',
-  stale_key: 'Kunci lawan bicara berubah. Coba kirim lagi.',
-  rate_limited: 'Terlalu banyak pesan. Tunggu sebentar.',
-  unsupported_kind: 'Jenis pesan belum didukung.',
-}
 const REPORT_REASONS = [
   { value: 'spam', label: 'Spam' },
   { value: 'abuse', label: 'Pelecehan' },
