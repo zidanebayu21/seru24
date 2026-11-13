@@ -18,6 +18,8 @@
   runtimeConfig: {
     // server-only, diisi dari SUPABASE_SERVICE_ROLE_KEY
     supabaseServiceRoleKey: '',
+    // kunci privat X25519 (base64) untuk enkripsi payload browser <-> server; env NUXT_TRANSPORT_PRIVATE_KEY
+    transportPrivateKey: '',
     // true = daftar tanpa email verifikasi (hanya masa uji, OWASP ASVS V2.1); env NUXT_AUTH_SKIP_EMAIL_CONFIRM
     authSkipEmailConfirm: false,
     public: {

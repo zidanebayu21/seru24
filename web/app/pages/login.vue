@@ -10,10 +10,17 @@ const submit = async () => {
   error.value = ''
   try {
     await loginWithPassword(identifier.value, password.value)
-    await bootstrapAccount(true)
-    await navigateTo('/')
   } catch (e) {
     error.value = errorMessage(e, 'Login gagal. Coba lagi.')
+    busy.value = false
+    return
+  }
+  try {
+    if ((await bootstrapAccount(true)) !== 'ready') throw new Error('kunci chat terkunci')
+    await navigateTo('/')
+  } catch {
+    await signOut()
+    error.value = 'Login berhasil, tetapi kunci chat tidak bisa dibuka. Coba lagi.'
   } finally {
     busy.value = false
   }
@@ -23,6 +30,7 @@ const submit = async () => {
 <template>
   <AuthCard title="Masuk" subtitle="Chat terenkripsi end-to-end">
     <p v-if="route.query.verified === '1'" class="notice">Email terverifikasi. Silakan masuk.</p>
+    <p v-else-if="route.query.relogin === '1'" class="notice">Masuk lagi untuk membuka pesan di perangkat ini.</p>
     <form class="stack" @submit.prevent="submit">
       <label>Email atau username
         <input

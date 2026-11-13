@@ -1,6 +1,5 @@
-export default defineLoggedHandler(async (event) => {
-  assertSameOrigin(event)
-  const accessToken = getRequestHeader(event, 'authorization')?.replace(/^Bearer\s+/i, '')
+export default defineSecureHandler(async (event, payload) => {
+  const accessToken = typeof payload.access_token === 'string' ? payload.access_token : ''
 
   // Cabut sesi di server, bukan hanya hapus cookie (OWASP ASVS V3.3.1)
   if (accessToken) {

@@ -4,9 +4,11 @@ import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js'
 import {
   createKeyBackup,
   decryptMessage,
+  derivePasswordSecrets,
   deriveConversationKey,
   encryptMessage,
   generateKeyPair,
+  newAuthSalt,
   openKeyBackup,
   safetyCode,
   type MessageContext,
@@ -99,14 +101,39 @@ describe('enkripsi pesan', () => {
   })
 })
 
+describe('password satu untuk login dan kunci', () => {
+  it('hasilnya tetap untuk password dan salt yang sama', async () => {
+    const salt = newAuthSalt()
+    const a = await derivePasswordSecrets('test123', salt)
+    const b = await derivePasswordSecrets('test123', salt)
+    expect(a.authSecret).toBe(b.authSecret)
+    expect(a.authSecret).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    expect(bytesToHex(a.wrapKey)).toBe(bytesToHex(b.wrapKey))
+  })
+
+  it('auth_secret tidak membocorkan password maupun wrap_key', async () => {
+    const s = await derivePasswordSecrets('test123', newAuthSalt())
+    expect(s.authSecret).not.toContain('test123')
+    expect(s.authSecret).not.toBe(Buffer.from(s.wrapKey).toString('base64url'))
+  })
+
+  it('salt berbeda menghasilkan rahasia berbeda untuk password yang sama', async () => {
+    const a = await derivePasswordSecrets('test123', newAuthSalt())
+    const b = await derivePasswordSecrets('test123', newAuthSalt())
+    expect(a.authSecret).not.toBe(b.authSecret)
+  })
+})
+
 describe('backup kunci', () => {
-  it('terbuka dengan kode yang benar dan ditolak dengan kode salah', async () => {
+  it('terbuka dengan password yang benar dan ditolak dengan password salah', async () => {
+    const salt = newAuthSalt()
+    const right = await derivePasswordSecrets('test123', salt)
+    const wrong = await derivePasswordSecrets('test124', salt)
     const pair = generateKeyPair()
-    const backup = await createKeyBackup({ 1: pair.secretKey }, 'kode-rahasia-panjang', ALICE)
-    const restored = await openKeyBackup(backup, 'kode-rahasia-panjang', ALICE)
-    expect(bytesToHex(restored['1'])).toBe(bytesToHex(pair.secretKey))
-    await expect(openKeyBackup(backup, 'kode-salah-sekali', ALICE)).rejects.toThrow()
-    await expect(openKeyBackup(backup, 'kode-rahasia-panjang', BOB)).rejects.toThrow()
+    const backup = createKeyBackup({ 1: pair.secretKey }, right.wrapKey, ALICE, salt)
+    expect(bytesToHex(openKeyBackup(backup, right.wrapKey, ALICE)['1']!)).toBe(bytesToHex(pair.secretKey))
+    expect(() => openKeyBackup(backup, wrong.wrapKey, ALICE)).toThrow()
+    expect(() => openKeyBackup(backup, right.wrapKey, BOB)).toThrow()
   })
 })
 

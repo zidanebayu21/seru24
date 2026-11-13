@@ -1,5 +1,9 @@
 import { createClient, type Session } from '@supabase/supabase-js'
+import { hkdf } from '@noble/hashes/hkdf.js'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { utf8ToBytes } from '@noble/hashes/utils.js'
 import type { H3Event } from 'h3'
+import { AUTH_SALT_BYTES, toBase64 } from '#shared/crypto'
 
 // Refresh token hanya di cookie httpOnly; access token dikirim di body dan disimpan di memori halaman.
 // OWASP ASVS V3.4.1-V3.4.3 (Secure, HttpOnly, SameSite) dan prefix __Host- (RFC 6265bis).
@@ -8,7 +12,10 @@ const REFRESH_MAX_AGE = 60 * 60 * 24 * 30
 
 const EMAIL_PATTERN = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,63}$/
 const USERNAME_PATTERN = /^[a-z0-9_]{3,30}$/
-const PASSWORD_MAX = 128
+// auth_secret = base64url 32 byte; auth_salt = base64 16 byte (shared/crypto.ts)
+const AUTH_SECRET_PATTERN = /^[A-Za-z0-9_-]{43}$/
+const AUTH_SALT_PATTERN = /^[A-Za-z0-9+/]{22}==$/
+const INFO_FAKE_SALT = 'seru24/v1/fake-salt'
 
 export interface SessionResponse {
   access_token: string
@@ -37,19 +44,44 @@ export const serviceClient = (event: H3Event) => {
   })
 }
 
-/**
- * Login boleh memakai email atau username. Username diterjemahkan ke email di server;
- * tidak ditemukan = null, dan pemanggil menjawab sama seperti password salah (OWASP ASVS V2.2).
- */
-export const resolveLoginEmail = async (event: H3Event, value: unknown): Promise<string | null> => {
+/** Email atau username, dinormalisasi; format lain ditolak 400. */
+export const parseIdentifier = (value: unknown) => {
   const identifier = text(value, 254).trim().toLowerCase()
   if (identifier.includes('@')) return parseEmail(identifier)
   if (!USERNAME_PATTERN.test(identifier)) throw badRequest()
+  return identifier
+}
+
+export interface LoginAccount {
+  email: string
+  salt: string
+}
+
+/** Cari akun aktif dari email atau username (service_role). null = tidak ada / dibanned / dihapus. */
+export const findLoginAccount = async (event: H3Event, identifier: string): Promise<LoginAccount | null> => {
   const client = serviceClient(event)
   if (!client) throw new Error('Konfigurasi belum lengkap: NUXT_SUPABASE_SERVICE_ROLE_KEY kosong')
-  const { data, error } = await client.rpc('seru24_login_email', { p_username: identifier })
-  if (error) throw new Error(`seru24_login_email gagal: ${error.message}`)
-  return typeof data === 'string' ? data : null
+  const { data, error } = await client.rpc('seru24_login_lookup', { p_identifier: identifier })
+  if (error) throw new Error(`seru24_login_lookup gagal: ${error.message}`)
+  const account = data as Partial<LoginAccount> | null
+  return account?.email && account.salt ? { email: account.email, salt: account.salt } : null
+}
+
+/**
+ * Salt palsu yang tetap untuk identifier tak terdaftar, supaya /prelogin tidak bisa dipakai
+ * menebak akun mana yang ada (OWASP ASVS V2.2, enumerasi akun).
+ */
+export const fakeSalt = (event: H3Event, identifier: string) =>
+  toBase64(hkdf(sha256, transportKeys(event).secretKey, undefined, utf8ToBytes(`${INFO_FAKE_SALT}|${identifier}`), AUTH_SALT_BYTES))
+
+export const parseAuthSecret = (value: unknown) => {
+  if (typeof value !== 'string' || !AUTH_SECRET_PATTERN.test(value)) throw badRequest()
+  return value
+}
+
+export const parseAuthSalt = (value: unknown) => {
+  if (typeof value !== 'string' || !AUTH_SALT_PATTERN.test(value)) throw badRequest()
+  return value
 }
 
 /** Tolak permintaan lintas situs ke endpoint yang memakai cookie (CSRF, OWASP ASVS V4.2.2). */
@@ -90,12 +122,6 @@ export const parseEmail = (value: unknown) => {
   const email = text(value, 254).trim().toLowerCase()
   if (!EMAIL_PATTERN.test(email)) throw badRequest()
   return email
-}
-
-export const parsePassword = (event: H3Event, value: unknown) => {
-  const password = text(value, PASSWORD_MAX)
-  if (password.length < Number(useRuntimeConfig(event).public.passwordMinLength)) throw badRequest()
-  return password
 }
 
 export const parseUsername = (value: unknown) => {

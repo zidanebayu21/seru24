@@ -1,6 +1,4 @@
 const PUBLIC_PAGES = new Set(['/login', '/register'])
-const KEY_PAGES: Partial<Record<AccountStatus, string>> = { setup: '/setup-keys', unlock: '/unlock' }
-const NOT_FOR_READY = new Set(['/', '/login', '/register', '/setup-keys', '/unlock'])
 
 export default defineNuxtRouteMiddleware(async (to) => {
   if (import.meta.server) return
@@ -19,11 +17,12 @@ export default defineNuxtRouteMiddleware(async (to) => {
     }
   }
 
-  const required = KEY_PAGES[account.status]
-  if (required) {
-    return to.path === required ? undefined : navigateTo(required)
+  // Kunci chat tidak ada di perangkat ini dan password tidak lagi di memori: minta login ulang
+  if (account.status === 'locked') {
+    await signOut()
+    return navigateTo('/login?relogin=1')
   }
-  if (NOT_FOR_READY.has(to.path)) {
+  if (to.path === '/' || PUBLIC_PAGES.has(to.path)) {
     return navigateTo('/chats')
   }
 })

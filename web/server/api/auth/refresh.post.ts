@@ -1,5 +1,4 @@
-export default defineLoggedHandler(async (event) => {
-  assertSameOrigin(event)
+export default defineSecureHandler(async (event) => {
   const refreshToken = readRefreshToken(event)
   if (!refreshToken) {
     throw createError({ statusCode: 401, statusMessage: 'Sesi berakhir' })

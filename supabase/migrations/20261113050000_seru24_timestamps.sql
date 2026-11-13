@@ -11,6 +11,10 @@
 
 begin;
 
+-- system_logs hanya-tambah: FK "on delete set null" akan meng-UPDATE log saat akun dihapus dan ditolak trigger.
+-- user_id dibiarkan sebagai uuid biasa agar jejak audit tetap ada setelah akun dihapus (OWASP ASVS V7.1).
+alter table seru24.system_logs drop constraint system_logs_user_id_fkey;
+
 create function seru24.set_updated_at() returns trigger
 language plpgsql
 set search_path = ''

@@ -18,8 +18,10 @@ const signupError = (error: AuthError) => {
 
 interface SignupInput {
   email: string
+  /** auth_secret dari browser (turunan password), bukan password asli. */
   password: string
-  metadata: { username: string; display_name: string }
+  /** auth_salt ikut disimpan trigger ke seru24.profiles untuk login berikutnya. */
+  metadata: { username: string; display_name: string; auth_salt: string }
 }
 
 /** Alur normal: Supabase mengirim email verifikasi (OWASP ASVS V2.1). */
@@ -55,13 +57,15 @@ const signUpWithoutEmailConfirmation = async (event: H3Event, input: SignupInput
   return { userId: data.user.id, session: login.data.session }
 }
 
-export default defineLoggedHandler(async (event) => {
-  assertSameOrigin(event)
-  const body = await readBody(event)
+export default defineSecureHandler(async (event, payload) => {
   const input: SignupInput = {
-    email: parseEmail(body?.email),
-    password: parsePassword(event, body?.password),
-    metadata: { username: parseUsername(body?.username), display_name: parseDisplayName(body?.display_name) },
+    email: parseEmail(payload.email),
+    password: parseAuthSecret(payload.auth_secret),
+    metadata: {
+      username: parseUsername(payload.username),
+      display_name: parseDisplayName(payload.display_name),
+      auth_salt: parseAuthSalt(payload.auth_salt),
+    },
   }
 
   const skipConfirm = String(useRuntimeConfig(event).authSkipEmailConfirm) === 'true'

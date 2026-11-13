@@ -44,7 +44,7 @@ const submit = async () => {
       display_name: form.display_name,
     })
     if (status === 'active') {
-      await bootstrapAccount(true)
+      if ((await bootstrapAccount(true)) !== 'ready') throw new Error('kunci chat gagal dibuat')
       await navigateTo('/')
     } else {
       done.value = true
@@ -91,6 +91,10 @@ const submit = async () => {
       <label>Ulangi password
         <input v-model="form.confirm" type="password" autocomplete="new-password" required maxlength="128">
       </label>
+      <p class="notice">
+        Password ini juga membuka pesan terenkripsi Anda dan tidak pernah dikirim ke server.
+        Jika lupa password, akun bisa dipulihkan tetapi pesan lama tidak bisa dibuka lagi.
+      </p>
       <p v-if="error" class="error" role="alert">{{ error }}</p>
       <button class="primary" type="submit" :disabled="busy">{{ busy ? 'Memproses…' : 'Daftar' }}</button>
     </form>

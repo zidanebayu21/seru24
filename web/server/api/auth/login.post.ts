@@ -2,14 +2,14 @@ const invalidCredentials = (cause?: unknown) =>
   // Pesan generik: tidak membedakan akun tidak ada dan password salah (OWASP ASVS V2.2)
   createError({ statusCode: 401, statusMessage: 'Email/username atau password salah', cause })
 
-export default defineLoggedHandler(async (event) => {
-  assertSameOrigin(event)
-  const body = await readBody(event)
-  const email = await resolveLoginEmail(event, body?.identifier ?? body?.email)
-  const password = typeof body?.password === 'string' ? body.password.slice(0, 128) : ''
-  if (!email) throw invalidCredentials(new Error('username tidak ditemukan'))
+/** Langkah 2 login: auth_secret (turunan password di browser) diteruskan ke Supabase sebagai password. */
+export default defineSecureHandler(async (event, payload) => {
+  const identifier = parseIdentifier(payload.identifier)
+  const authSecret = parseAuthSecret(payload.auth_secret)
+  const account = await findLoginAccount(event, identifier)
+  if (!account) throw invalidCredentials(new Error('akun tidak ditemukan'))
 
-  const { data, error } = await authClient(event).auth.signInWithPassword({ email, password })
+  const { data, error } = await authClient(event).auth.signInWithPassword({ email: account.email, password: authSecret })
   if (error?.code === 'email_not_confirmed') {
     throw createError({ statusCode: 403, statusMessage: 'Email belum diverifikasi', cause: error })
   }
