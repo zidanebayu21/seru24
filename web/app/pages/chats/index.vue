@@ -65,25 +65,14 @@ const startChat = async (user: FoundUser) => {
   }
 }
 
-const logout = async () => {
-  await signOut()
-  await navigateTo('/login')
-}
-
 onMounted(load)
 </script>
 
 <template>
   <main class="page">
     <header class="top row">
-      <div>
-        <strong>seru24</strong>
-        <p class="muted">@{{ account.me?.username }}</p>
-      </div>
-      <div class="row">
-        <NuxtLink to="/akun/password">Ganti password</NuxtLink>
-        <button type="button" @click="logout">Keluar</button>
-      </div>
+      <strong class="brand">seru24</strong>
+      <AccountMenu />
     </header>
 
     <form class="row search" @submit.prevent="search">
@@ -125,7 +114,7 @@ onMounted(load)
 <style scoped>
 .page { max-width: 640px; margin: 0 auto; padding: 16px; display: grid; gap: 12px; }
 .top { justify-content: space-between; }
-.top p { margin: 0; }
+.brand { color: var(--accent); font-size: 18px; }
 .search input { flex: 1; }
 .found, .item {
   justify-content: space-between;
