@@ -1,4 +1,4 @@
-﻿# dependencies
+# dependencies
 node_modules/
 
 # secrets (jangan pernah di-commit; pakai .env.example sebagai template)
@@ -23,8 +23,6 @@ web/dist/
 mobile/.expo/
 mobile/dist/
 mobile/web-build/
-mobile/android/
-mobile/ios/
 *.orig.*
 
 # Vercel

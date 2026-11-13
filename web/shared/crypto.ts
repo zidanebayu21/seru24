@@ -135,6 +135,19 @@ export interface PasswordSecrets {
   wrapKey: Uint8Array
 }
 
+export type ScryptFn = (
+  password: Uint8Array,
+  salt: Uint8Array,
+  params: { N: number; r: number; p: number; dkLen: number },
+) => Promise<Uint8Array>
+
+let scryptImpl: ScryptFn = (password, salt, params) => scryptAsync(password, salt, params)
+
+/** Mobile memasang scrypt native: Hermes tanpa JIT terlalu lambat untuk scrypt JavaScript. */
+export const setScryptImplementation = (fn: ScryptFn) => {
+  scryptImpl = fn
+}
+
 /** Salt acak per akun, dibuat saat daftar dan disimpan server (bukan rahasia). */
 export const newAuthSalt = (): string => toBase64(randomBytes(AUTH_SALT_BYTES))
 
@@ -143,7 +156,7 @@ export const newAuthSalt = (): string => toBase64(randomBytes(AUTH_SALT_BYTES))
  * server hanya pernah melihat authSecret, sehingga tidak bisa menghitung wrapKey maupun password asli.
  */
 export const derivePasswordSecrets = async (password: string, authSalt: string): Promise<PasswordSecrets> => {
-  const master = await scryptAsync(utf8ToBytes(password.normalize('NFKC')), fromBase64(authSalt), {
+  const master = await scryptImpl(utf8ToBytes(password.normalize('NFKC')), fromBase64(authSalt), {
     ...SCRYPT_PARAMS,
     dkLen: KEY_BYTES,
   })
