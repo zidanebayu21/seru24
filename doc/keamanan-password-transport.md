@@ -47,9 +47,23 @@ Kenapa salt acak per akun, bukan bagian email (mis. 2 huruf depan + password + 2
 3. `POST /api/auth/login {identifier, auth_secret}`; server mencari email lalu `signInWithPassword`.
 4. Bila kunci chat belum ada di perangkat: unduh backup, buka dengan `wrap_key`.
 
-**Ganti password** (belum dibuat): browser membuka backup dengan `wrap_key` lama, membungkus ulang dengan `wrap_key` baru, membuat `auth_salt` baru, lalu memperbarui password Supabase ke `auth_secret` baru dalam satu alur.
+### Ganti dan reset password
 
-**Lupa password**: akun bisa direset lewat email, tetapi pesan lama tidak bisa dibuka (server memang tidak pernah bisa). Dijelaskan di halaman daftar.
+| | Ganti password (`/akun/password`) | Reset password (`/lupa-password` → email → `/reset-password`) |
+|---|---|---|
+| Kapan | pengguna ingat password lama | pengguna lupa password |
+| Bukti identitas | `auth_secret` lama diverifikasi ke Supabase (ASVS V2.1.6) | tautan email; token wajib ber-`amr` `recovery` |
+| Kunci chat | **tetap**; backup dibungkus ulang dengan `wrap_key` baru | **diganti** pasangan baru (versi +1), versi lama dicabut |
+| Pesan lama | **tetap terbaca** | **tidak dapat dibaca lagi** |
+| Sesi | sesi perangkat lain diputus | semua sesi diputus |
+| Server | `POST /api/auth/change-password` → `seru24_change_auth` | `POST /api/auth/forgot-password`, `POST /api/auth/reset-password` → `seru24_reset_keys` |
+| Log | `password_changed` / `password_change_failed` | `password_reset_requested`, `password_reset` / `password_reset_rejected` |
+
+Ganti password: browser mengambil salt lama (`/prelogin`), menurunkan `auth_secret` lama dan baru, membungkus kunci chat yang ada di perangkat dengan `wrap_key` baru, lalu mengirim semuanya. Server memverifikasi password lama, mengganti password Supabase, lalu menyimpan salt dan backup baru; bila penyimpanan gagal, password dikembalikan ke yang lama agar salt dan password tetap cocok.
+
+Reset password: `/forgot-password` selalu menjawab sama (ASVS V2.5.1). Tautan email mengarah ke `/reset-password#access_token=...&type=recovery`; token dihapus dari address bar begitu dibaca. Browser membuat salt, password dan pasangan kunci baru; server menolak token yang bukan hasil pemulihan (sesi login biasa tidak bisa dipakai mengganti kunci). Perangkat lain yang masih menyimpan kunci versi lama otomatis diminta login ulang.
+
+Syarat: email reset dikirim Supabase. Tambahkan `https://seru24.vercel.app/**` ke Redirect URLs (Authentication → URL Configuration). Pengirim email bawaan Supabase dibatasi beberapa email per jam; untuk produksi pakai SMTP sendiri.
 
 ### Konsekuensi
 

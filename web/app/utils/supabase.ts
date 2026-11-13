@@ -39,9 +39,13 @@ export const useSupabase = (): SupabaseClient => {
   return client
 }
 
-/** Semua akses data lewat fungsi public.seru24_*; tabel tidak dibuka ke API. */
-export const rpc = async <T = unknown>(fn: string, args?: Record<string, unknown>): Promise<T> => {
-  const { data, error } = await useSupabase().rpc(fn, args)
+/**
+ * Semua akses data lewat fungsi public.seru24_*; tabel tidak dibuka ke API.
+ * bearer: token khusus (mis. token pemulihan dari email) sebagai pengganti sesi aktif.
+ */
+export const rpc = async <T = unknown>(fn: string, args?: Record<string, unknown>, bearer?: string): Promise<T> => {
+  const query = useSupabase().rpc(fn, args)
+  const { data, error } = await (bearer ? query.setHeader('Authorization', `Bearer ${bearer}`) : query)
   if (error) throw error
   return data as T
 }

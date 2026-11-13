@@ -40,9 +40,7 @@ const signUpWithEmailConfirmation = async (event: H3Event, input: SignupInput) =
  * terverifikasi, tanpa mengirim email, lalu langsung login.
  */
 const signUpWithoutEmailConfirmation = async (event: H3Event, input: SignupInput) => {
-  const admin = serviceClient(event)
-  if (!admin) throw new Error('Konfigurasi belum lengkap: NUXT_SUPABASE_SERVICE_ROLE_KEY kosong')
-  const { data, error } = await admin.auth.admin.createUser({
+  const { data, error } = await requireServiceClient(event).auth.admin.createUser({
     email: input.email,
     password: input.password,
     email_confirm: true,

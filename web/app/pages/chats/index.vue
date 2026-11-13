@@ -80,7 +80,10 @@ onMounted(load)
         <strong>seru24</strong>
         <p class="muted">@{{ account.me?.username }}</p>
       </div>
-      <button type="button" @click="logout">Keluar</button>
+      <div class="row">
+        <NuxtLink to="/akun/password">Ganti password</NuxtLink>
+        <button type="button" @click="logout">Keluar</button>
+      </div>
     </header>
 
     <form class="row search" @submit.prevent="search">

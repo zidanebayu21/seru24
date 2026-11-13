@@ -24,7 +24,8 @@ const INFO_MESSAGE = 'seru24/v1/msg'
 const INFO_AUTH = 'seru24/v1/auth'
 const INFO_KEYWRAP = 'seru24/v1/keywrap'
 const AAD_BACKUP = 'seru24/v1/backup'
-const SCRYPT_PARAMS = { N: 2 ** 15, r: 8, p: 1 } as const
+/** Parameter scrypt untuk password; disimpan juga di key_backups.kdf_params sebagai catatan. */
+export const SCRYPT_PARAMS = { N: 2 ** 15, r: 8, p: 1 } as const
 export const AUTH_SALT_BYTES = 16
 
 export type MessageKind = 'text' | 'image' | 'file'

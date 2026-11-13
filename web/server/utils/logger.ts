@@ -49,9 +49,19 @@ const routeOf = (event: H3Event) => `${event.method} ${event.path.split('?')[0]}
 const causeMessage = (error: H3Error) =>
   error.cause instanceof Error ? error.cause.message.slice(0, DETAIL_MAX) : null
 
-/** Keputusan autentikasi yang berhasil (OWASP ASVS V7.2.1), mis. login_success. */
+/** Kejadian autentikasi (OWASP ASVS V7.2.1). */
+export const logAuthEvent = (
+  event: H3Event,
+  level: 'info' | 'warning',
+  code: string,
+  message: string,
+  status: number,
+  userId?: string,
+) => writeLog(event, { level, channel: 'auth', event: code, message, status, context: {}, userId })
+
+/** Keputusan autentikasi yang berhasil, mis. login_success. */
 export const logAuthSuccess = (event: H3Event, code: string, userId: string, message: string) =>
-  writeLog(event, { level: 'info', channel: 'auth', event: code, message, status: 200, context: {}, userId })
+  logAuthEvent(event, 'info', code, message, 200, userId)
 
 export interface LoggedHandlerOptions {
   /** event_code untuk permintaan yang ditolak (4xx); false = tidak dicatat. */

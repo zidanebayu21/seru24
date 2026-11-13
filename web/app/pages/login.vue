@@ -31,6 +31,7 @@ const submit = async () => {
   <AuthCard title="Masuk" subtitle="Chat terenkripsi end-to-end">
     <p v-if="route.query.verified === '1'" class="notice">Email terverifikasi. Silakan masuk.</p>
     <p v-else-if="route.query.relogin === '1'" class="notice">Masuk lagi untuk membuka pesan di perangkat ini.</p>
+    <p v-else-if="route.query.reset === '1'" class="notice">Password sudah direset. Masuk dengan password baru.</p>
     <form class="stack" @submit.prevent="submit">
       <label>Email atau username
         <input
@@ -48,6 +49,8 @@ const submit = async () => {
       <p v-if="error" class="error" role="alert">{{ error }}</p>
       <button class="primary" type="submit" :disabled="busy">{{ busy ? 'Memproses…' : 'Masuk' }}</button>
     </form>
-    <p class="muted">Belum punya akun? <NuxtLink to="/register">Daftar</NuxtLink></p>
+    <p class="muted">
+      <NuxtLink to="/lupa-password">Lupa password?</NuxtLink> · Belum punya akun? <NuxtLink to="/register">Daftar</NuxtLink>
+    </p>
   </AuthCard>
 </template>

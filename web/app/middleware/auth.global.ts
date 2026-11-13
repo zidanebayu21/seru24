@@ -1,7 +1,9 @@
-const PUBLIC_PAGES = new Set(['/login', '/register'])
+const PUBLIC_PAGES = new Set(['/login', '/register', '/lupa-password'])
+// halaman tautan email: dibuka apa adanya, sesi yang sedang aktif tidak memengaruhi
+const OPEN_PAGES = new Set(['/reset-password'])
 
 export default defineNuxtRouteMiddleware(async (to) => {
-  if (import.meta.server) return
+  if (import.meta.server || OPEN_PAGES.has(to.path)) return
 
   const token = await getAccessToken()
   if (!token) {

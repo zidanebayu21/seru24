@@ -6,7 +6,7 @@ const done = ref(false)
 const busy = ref(false)
 
 const USERNAME_PATTERN = /^[a-z0-9_]{3,30}$/
-const passwordMin = Number(useRuntimeConfig().public.passwordMinLength)
+const { passwordMin, validateNewPassword } = usePasswordPolicy()
 
 const checkUsername = async () => {
   form.username = form.username.trim().toLowerCase()
@@ -27,9 +27,7 @@ const validate = () => {
   if (form.username.includes('@')) return 'Username bukan email. Contoh: zidane_21'
   if (!USERNAME_PATTERN.test(form.username)) return 'Username 3-30 karakter: huruf kecil, angka, atau _'
   if (usernameState.value === 'taken') return 'Username sudah dipakai'
-  if (form.password.length < passwordMin) return `Password minimal ${passwordMin} karakter`
-  if (form.password !== form.confirm) return 'Konfirmasi password tidak sama'
-  return ''
+  return validateNewPassword(form.password, form.confirm)
 }
 
 const submit = async () => {

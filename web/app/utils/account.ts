@@ -84,6 +84,8 @@ export const bootstrapAccount = async (afterLogin = false): Promise<AccountStatu
   account.me = me
 
   keyring = me.has_keys ? await loadKeyring(me.id) : null
+  // kunci lokal versi lama (setelah reset password di perangkat lain) dianggap tidak ada
+  if (keyring && !keyring[String(me.key_version)]) keyring = null
   const material = takePendingMaterial()
   try {
     if (!keyring && material) {
