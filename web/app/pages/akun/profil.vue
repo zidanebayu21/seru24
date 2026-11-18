@@ -55,6 +55,32 @@ const runStorageAction = async (action: () => Promise<void>, notice: string, fai
   }
 }
 
+const importInput = ref<HTMLInputElement | null>(null)
+
+const exportChats = () =>
+  runStorageAction(
+    () => downloadLocalBackup(account.me?.id ?? ''),
+    'Cadangan diunduh. Simpan file ini baik-baik: hanya akun ini yang bisa membukanya.',
+    'Gagal membuat file cadangan.',
+  )
+
+const importChats = async (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  let message = ''
+  await runStorageAction(
+    async () => {
+      const result = await importLocalBackupFile(account.me?.id ?? '', file)
+      message = `${result.conversations} percakapan dan ${result.messages} pesan digabungkan ke browser ini.`
+    },
+    '',
+    'Gagal mengimpor: pastikan file cadangan seru24 milik akun ini.',
+  )
+  if (message) storageNotice.value = message
+}
+
 const clearChats = () =>
   runStorageAction(
     () => clearAllLocalChats(account.me?.id),
@@ -124,6 +150,13 @@ onMounted(() => {
       <p v-if="storageNotice" class="notice">{{ storageNotice }}</p>
       <p v-if="storageError" class="error" role="alert">{{ storageError }}</p>
       <div class="stack actions">
+        <button type="button" :disabled="storageBusy" @click="exportChats">
+          Ekspor riwayat ke file (.txt)
+        </button>
+        <button type="button" :disabled="storageBusy" @click="importInput?.click()">
+          Impor riwayat dari file
+        </button>
+        <input ref="importInput" type="file" accept=".txt,text/plain" hidden @change="importChats">
         <button type="button" :disabled="storageBusy" @click="clearChats">
           Bersihkan semua chat lokal
         </button>

@@ -134,6 +134,8 @@ accountCore = createAccountCore(
 
 const accountApi = accountCore;
 
+export const getKeyring = () => accountApi.getKeyring();
+
 export const e2ee = createE2ee({
   rpc,
   getKeyring: () => accountApi.getKeyring(),

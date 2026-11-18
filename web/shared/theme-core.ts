@@ -1,7 +1,7 @@
 // Tema tampilan bersama web dan mobile. Palet ini juga ada di web/app/assets/main.css (variabel CSS);
 // theme-core.test.ts memastikan keduanya tidak berbeda.
 
-export type ThemeName = 'light' | 'dark' | 'teal'
+export type ThemeName = 'light' | 'dark' | 'brown'
 export type ThemePref = 'system' | ThemeName
 
 export interface Palette {
@@ -42,18 +42,18 @@ export const PALETTES: Record<ThemeName, Palette> = {
     danger: '#f97066',
     warnBg: '#3a2f12',
   },
-  // coklat tua hangat dengan aksen teal
-  teal: {
-    bg: '#1d1612',
-    surface: '#2a201a',
-    text: '#f2e8dd',
-    muted: '#b5a392',
-    border: '#44342b',
-    accent: '#2ec4b0',
-    accentText: '#06231f',
-    mine: '#1d4a44',
-    danger: '#ff8a7a',
-    warnBg: '#4a3a1c',
+  // coklat tua hangat dengan aksen tembaga, mengikuti tampilan scaner_sca_sast
+  brown: {
+    bg: '#13100e',
+    surface: '#221b17',
+    text: '#f3ece4',
+    muted: '#a99889',
+    border: '#3c2f26',
+    accent: '#c87840',
+    accentText: '#fffaf5',
+    mine: '#4a2e1c',
+    danger: '#f87171',
+    warnBg: '#3d2d14',
   },
 }
 
@@ -61,7 +61,7 @@ export const THEME_OPTIONS: { value: ThemePref; label: string }[] = [
   { value: 'system', label: 'Ikuti sistem' },
   { value: 'light', label: 'Terang' },
   { value: 'dark', label: 'Gelap' },
-  { value: 'teal', label: 'Coklat teal' },
+  { value: 'brown', label: 'Coklat' },
 ]
 
 export const isThemePref = (value: unknown): value is ThemePref =>

@@ -28,12 +28,12 @@ describe('theme-core', () => {
   it('mengikuti sistem hanya untuk pilihan system', () => {
     expect(resolveTheme('system', true)).toBe('dark')
     expect(resolveTheme('system', false)).toBe('light')
-    expect(resolveTheme('teal', false)).toBe('teal')
+    expect(resolveTheme('brown', false)).toBe('brown')
     expect(resolveTheme('light', true)).toBe('light')
   })
 
   it('menolak nilai pilihan yang tidak dikenal', () => {
-    expect(isThemePref('teal')).toBe(true)
+    expect(isThemePref('brown')).toBe(true)
     expect(isThemePref('merah')).toBe(false)
     expect(isThemePref(null)).toBe(false)
   })

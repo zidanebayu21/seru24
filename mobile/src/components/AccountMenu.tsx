@@ -7,6 +7,7 @@ import {
   type LocalChatStorageStats,
 } from '../lib/chatStorage';
 import { APP_VERSION_NAME } from '../env';
+import { exportBackupFile, importBackupFile } from '../lib/backup';
 import { account, signOut, webUrl } from '../lib/core';
 import { disableNotifications, enableNotifications, isNotifyEnabled, notifySupported } from '../lib/notify';
 import { THEME_OPTIONS } from '../../../web/shared/theme-core';
@@ -53,6 +54,28 @@ export const AccountMenu = ({ onSignedOut }: Props) => {
     setStorageNote('');
     refreshStats().catch(() => undefined);
   }, [open, refreshStats]);
+
+  const runBackup = async (action: () => Promise<string>) => {
+    if (storageBusy) return;
+    setStorageBusy(true);
+    setConfirmReset(false);
+    setStorageNote('');
+    try {
+      setStorageNote(await action());
+      await refreshStats();
+    } catch (error) {
+      setStorageNote(error instanceof Error && error.message ? error.message : 'Gagal memproses file cadangan.');
+    } finally {
+      setStorageBusy(false);
+    }
+  };
+
+  const handleExport = () => runBackup(async () => `Disimpan: Download/seru24/${await exportBackupFile(me?.id ?? '')}`);
+
+  const handleImport = () => runBackup(async () => {
+    const result = await importBackupFile(me?.id ?? '');
+    return result ? `${result.conversations} percakapan dan ${result.messages} pesan digabungkan.` : '';
+  });
 
   const handleClearChats = async () => {
     if (storageBusy) return;
@@ -157,6 +180,8 @@ export const AccountMenu = ({ onSignedOut }: Props) => {
           </Text>
           {storageNote ? <Text style={[ui.muted, { fontSize: 12, color: colors.accent }]}>{storageNote}</Text> : null}
         </View>
+        <MenuItem label="Ekspor riwayat ke file (.txt)" onPress={handleExport} />
+        <MenuItem label="Impor riwayat dari file" onPress={handleImport} />
         <MenuItem label="Bersihkan chat lokal" onPress={handleClearChats} />
         <MenuItem
           label={confirmReset ? 'Ketuk lagi: konfirmasi reset DB chat' : 'Reset penuh DB chat'}

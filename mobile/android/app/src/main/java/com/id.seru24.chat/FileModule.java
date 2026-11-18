@@ -211,6 +211,55 @@ public class FileModule extends ReactContextBaseJavaModule {
         promise.resolve(null);
     }
 
+    /** Simpan teks (cadangan riwayat chat) sebagai file .txt di Download/seru24; hasilnya nama file yang tersimpan. */
+    @ReactMethod
+    public void saveTextToDownloads(String name, String text, Promise promise) {
+        EXECUTOR.execute(() -> {
+            ContentResolver resolver = getReactApplicationContext().getContentResolver();
+            Uri saved = null;
+            try {
+                ContentValues values = new ContentValues();
+                values.put(MediaStore.Downloads.DISPLAY_NAME, name);
+                values.put(MediaStore.Downloads.MIME_TYPE, "text/plain");
+                values.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/seru24");
+                values.put(MediaStore.Downloads.IS_PENDING, 1);
+                saved = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                if (saved == null) throw new IllegalStateException("Folder Download tidak bisa ditulis");
+                try (OutputStream out = resolver.openOutputStream(saved)) {
+                    if (out == null) throw new IllegalStateException("File tidak bisa ditulis");
+                    out.write(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                }
+                values.clear();
+                values.put(MediaStore.Downloads.IS_PENDING, 0);
+                resolver.update(saved, values, null, null);
+                promise.resolve(name);
+            } catch (Exception e) {
+                if (saved != null) resolver.delete(saved, null, null);
+                promise.reject("save_error", e.getMessage(), e);
+            }
+        });
+    }
+
+    /** Baca file teks pilihan pengguna (cadangan); ditolak bila lebih besar dari batas agar memori aman. */
+    @ReactMethod
+    public void readTextFile(String uri, double maxBytes, Promise promise) {
+        EXECUTOR.execute(() -> {
+            try (InputStream in = getReactApplicationContext().getContentResolver().openInputStream(Uri.parse(uri))) {
+                if (in == null) throw new IllegalStateException("File tidak bisa dibuka");
+                ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                byte[] chunk = new byte[64 * 1024];
+                int read;
+                while ((read = in.read(chunk)) > 0) {
+                    buffer.write(chunk, 0, read);
+                    if (buffer.size() > (long) maxBytes) throw new IllegalStateException("File terlalu besar");
+                }
+                promise.resolve(buffer.toString("UTF-8"));
+            } catch (Exception e) {
+                promise.reject("read_error", e.getMessage(), e);
+            }
+        });
+    }
+
     /** Peta id lampiran -> content URI hasil unduhan (hanya lokasi file, tanpa kunci atau isi). */
     private SharedPreferences downloads() {
         return getReactApplicationContext().getSharedPreferences("seru24_downloads", Context.MODE_PRIVATE);

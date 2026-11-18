@@ -27,6 +27,8 @@ interface NativeFilesModule {
   ) => Promise<string>;
   openFile: (uri: string, mime: string) => Promise<void>;
   savedFile: (id: string) => Promise<string | null>;
+  saveTextToDownloads: (name: string, text: string) => Promise<string>;
+  readTextFile: (uri: string, maxBytes: number) => Promise<string>;
 }
 
 export type Progress = (done: number, total: number) => void;
@@ -57,6 +59,10 @@ const withProgress = async <T>(id: string, onProgress: Progress | undefined, run
 };
 
 export const pickFiles = (): Promise<PickedFile[]> => requireNative().pickFiles();
+
+export const saveTextToDownloads = (name: string, text: string) => requireNative().saveTextToDownloads(name, text);
+
+export const readTextFile = (uri: string, maxBytes: number) => requireNative().readTextFile(uri, maxBytes);
 
 /** Enkripsi lalu unggah satu file; hasilnya isi pesan kind 'file' yang siap dienkripsi E2EE. */
 export const uploadFile = async (conversationId: string, file: PickedFile, onProgress?: Progress): Promise<FileMessageBody> => {
