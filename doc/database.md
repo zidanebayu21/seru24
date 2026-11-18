@@ -53,7 +53,7 @@ Media: file dienkripsi di klien dengan kunci acak 32 byte; kunci file, nama, dan
 | Kripto | `@noble/curves`, `@noble/hashes`, `@noble/ciphers` (JS murni, teraudit) | library yang sama + `expo-crypto` untuk angka acak |
 | Kode bersama | folder `shared/` (kripto, tipe, pemanggilan RPC) dipakai kedua app | sama |
 | Sesi | refresh token di cookie httpOnly, Secure, SameSite=Lax yang dikelola server Nitro; access token (JWT singkat) hanya di memori halaman | refresh token di `expo-secure-store`; access token di memori |
-| Kunci privat | IndexedDB, dibungkus kunci AES-GCM WebCrypto non-extractable | `expo-secure-store` (Keystore/Keychain) |
+| Kunci privat & cache chat | IndexedDB (`seru24` untuk `keyring`, `seru24_chat_cache` untuk riwayat chat lokal), dibungkus kunci AES-GCM WebCrypto non-extractable | `expo-secure-store` (Keystore/Keychain) |
 | Realtime | Supabase Realtime pada `messages` | sama |
 | Notifikasi | Web Push (opsional) | Expo Push (FCM/APNs) |
 | Lainnya | header keamanan (CSP, HSTS), service role key hanya di server Nitro | tanpa service role key, tanpa rahasia di bundle |
@@ -297,7 +297,7 @@ Catatan:
 | `attachments_sent` | int | |
 | `reports_opened` | int | |
 
-Diisi job `pg_cron` tiap malam dari `system_logs` dan tabel terkait. Hanya angka agregat, tanpa data per orang.
+Diisi oleh RPC `public.seru24_collect_daily_stats_and_prune()` (dijadwalkan via `pg_cron` maupun endpoint `/api/cron/daily-stats` dari cron eksternal). Fungsi ini juga mengecek `pg_database_size(current_database())`: bila >= 400 MB (`419430400` byte), 1000 baris tertua berdasarkan `created_at` lintas `system_logs` dan `messages` dieliminasi otomatis setelah statistik harian direkap. Hanya angka agregat, tanpa data per orang.
 
 ## Tipe dan ukuran kolom
 
@@ -540,7 +540,7 @@ Tambahan:
 
 - Bucket `chat-media` dan `avatars` privat; policy Storage mengikuti keanggotaan folder `conversation_id`; akses lewat signed URL berumur pendek.
 - Realtime hanya untuk `messages` dan `conversation_members` (centang dibaca); otomatis mengikuti RLS.
-- `pg_cron`: hapus pesan `expires_at < now()` beserta blob-nya, dan `system_logs` lama.
+- `pg_cron` / `/api/cron/daily-stats`: rekap `daily_stats`, hapus pesan `expires_at < now()` dan `rate_limits` usang, serta eliminasi 1000 baris tertua (`system_logs` / `messages`) saat DB >= 400 MB lewat `seru24_collect_daily_stats_and_prune()`. Riwayat chat web juga disimpan terenkripsi di IndexedDB Chrome (`seru24_chat_cache`) dengan opsi hapus lokal per pesan, per percakapan, maupun reset penuh browser.
 - Supabase Auth: verifikasi email wajib, panjang password minimal 12, proteksi password bocor, rate limit, MFA TOTP opsional.
 
 ## Pemetaan OWASP ASVS

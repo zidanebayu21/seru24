@@ -3,8 +3,10 @@ import {
   CHAT_MOBILE_PREFETCH_SCREENS,
   CHAT_PAGE_SIZE,
   CHAT_PREFETCH_OFFSET,
+  mergeCachedMessages,
   mergePagedBubbles,
   oldestPersistedSeq,
+  sliceMessagesPage,
 } from './chat-core'
 
 describe('paginasi pesan', () => {
@@ -35,5 +37,36 @@ describe('paginasi pesan', () => {
       { key: 'local', seq: 0, pending: true },
     ]
     expect(mergePagedBubbles(older, current).map((x) => x.key)).toEqual(['m1', 'm2', 'm3', 'local'])
+  })
+
+  it('menggabungkan cache lokal dengan pesan server sambil menjaga hapus lokal', () => {
+    const cached = [
+      { client_msg_id: 'c1', seq: 1, edited_at: null },
+      { client_msg_id: 'c2', seq: 2, edited_at: null },
+      { client_msg_id: 'c3', seq: 3, edited_at: null },
+    ]
+    const incoming = [
+      { client_msg_id: 'c3', seq: 3, edited_at: '2026-11-18T00:00:00Z' },
+      { client_msg_id: 'c4', seq: 4, edited_at: null },
+      { client_msg_id: 'c2', seq: 2, edited_at: null },
+    ]
+    const deleted = new Set(['c2'])
+    const merged = mergeCachedMessages(cached, incoming, deleted, 1)
+    expect(merged).toEqual([
+      { client_msg_id: 'c3', seq: 3, edited_at: '2026-11-18T00:00:00Z' },
+      { client_msg_id: 'c4', seq: 4, edited_at: null },
+    ])
+  })
+
+  it('memotong halaman pesan lokal untuk muat awal dan scroll ke atas', () => {
+    const list = [1, 2, 3, 4, 5].map((seq) => ({ seq }))
+    expect(sliceMessagesPage(list, null, 3)).toEqual({
+      rows: [{ seq: 3 }, { seq: 4 }, { seq: 5 }],
+      hasOlder: true,
+    })
+    expect(sliceMessagesPage(list, 3, 3)).toEqual({
+      rows: [{ seq: 1 }, { seq: 2 }],
+      hasOlder: false,
+    })
   })
 })

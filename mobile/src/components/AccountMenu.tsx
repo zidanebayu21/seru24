@@ -1,5 +1,11 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Linking, Modal, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import {
+  clearAllLocalChats,
+  getLocalChatStorageStats,
+  resetFullLocalStorage,
+  type LocalChatStorageStats,
+} from '../lib/chatStorage';
 import { account, signOut, webUrl } from '../lib/core';
 import { disableNotifications, enableNotifications, isNotifyEnabled, notifySupported } from '../lib/notify';
 import { colors, ui } from '../theme';
@@ -18,7 +24,64 @@ export const AccountMenu = ({ onSignedOut }: Props) => {
   const [open, setOpen] = useState(false);
   const [notify, setNotify] = useState(isNotifyEnabled());
   const [notifyHint, setNotifyHint] = useState('');
+  const [stats, setStats] = useState<LocalChatStorageStats>({ conversations: 0, messages: 0, sizeBytes: null });
+  const [storageBusy, setStorageBusy] = useState(false);
+  const [storageNote, setStorageNote] = useState('');
+  const [confirmReset, setConfirmReset] = useState(false);
   const me = account.me;
+
+  const formatBytes = (bytes: number | null) => {
+    if (bytes === null) return 'ukuran lokal';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  };
+
+  const refreshStats = useCallback(async () => {
+    if (!me?.id) return;
+    setStats(await getLocalChatStorageStats(me.id));
+  }, [me?.id]);
+
+  useEffect(() => {
+    if (!open) {
+      setConfirmReset(false);
+      return;
+    }
+    setStorageNote('');
+    refreshStats().catch(() => undefined);
+  }, [open, refreshStats]);
+
+  const handleClearChats = async () => {
+    if (storageBusy) return;
+    setStorageBusy(true);
+    setConfirmReset(false);
+    setStorageNote('');
+    try {
+      await clearAllLocalChats(me?.id);
+      await refreshStats();
+      setStorageNote('Cache chat lokal dibersihkan.');
+    } finally {
+      setStorageBusy(false);
+    }
+  };
+
+  const handleResetDb = async () => {
+    if (storageBusy) return;
+    if (!confirmReset) {
+      setConfirmReset(true);
+      return;
+    }
+    setStorageBusy(true);
+    setConfirmReset(false);
+    setStorageNote('');
+    try {
+      await resetFullLocalStorage(me?.id);
+      await refreshStats();
+      setStorageNote('Database chat lokal direset penuh.');
+    } finally {
+      setStorageBusy(false);
+    }
+  };
 
   const toggleNotify = async (on: boolean) => {
     setNotifyHint('');
@@ -69,6 +132,18 @@ export const AccountMenu = ({ onSignedOut }: Props) => {
               </View>
             ) : null}
             {notifyHint ? <Text style={[ui.error, { fontSize: 12, paddingHorizontal: 10 }]}>{notifyHint}</Text> : null}
+            <View style={styles.storageBox}>
+              <Text style={[ui.muted, { fontSize: 12 }]}>
+                DB Lokal: {stats.conversations} chat · {stats.messages} pesan ({formatBytes(stats.sizeBytes)})
+              </Text>
+              {storageNote ? <Text style={[ui.muted, { fontSize: 12, color: colors.accent }]}>{storageNote}</Text> : null}
+            </View>
+            <MenuItem label="Bersihkan chat lokal" onPress={handleClearChats} />
+            <MenuItem
+              label={confirmReset ? 'Ketuk lagi: konfirmasi reset DB chat' : 'Reset penuh DB chat'}
+              danger
+              onPress={handleResetDb}
+            />
             <MenuItem label="Keluar" danger onPress={logout} />
           </View>
         </Pressable>
@@ -89,6 +164,7 @@ const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.15)', alignItems: 'flex-end', paddingTop: 64, paddingRight: 16 },
   menu: { minWidth: 220, backgroundColor: colors.surface, borderRadius: 12, padding: 6, elevation: 6 },
   who: { padding: 10, borderBottomWidth: 1, borderBottomColor: colors.border, marginBottom: 4 },
+  storageBox: { paddingHorizontal: 10, paddingVertical: 6, borderTopWidth: 1, borderTopColor: colors.border, marginTop: 4 },
   item: { paddingVertical: 11, paddingHorizontal: 10, borderRadius: 8 },
   toggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 },
 });

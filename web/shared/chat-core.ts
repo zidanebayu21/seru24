@@ -83,3 +83,48 @@ export const mergePagedBubbles = <T extends PagedBubble>(incoming: readonly T[],
   for (const item of current) byKey.set(item.key, item)
   return [...byKey.values()].sort((a, b) => (a.pending ? Infinity : a.seq) - (b.pending ? Infinity : b.seq))
 }
+
+export interface CacheableMessage {
+  client_msg_id: string
+  seq: number
+  deleted_at?: string | null
+  edited_at?: string | null
+}
+
+/** Gabungkan pesan dari cache IndexedDB dan server sambil mengabaikan pesan yang sudah dihapus lokal. */
+export const mergeCachedMessages = <T extends CacheableMessage>(
+  cached: readonly T[],
+  incoming: readonly T[],
+  deletedClientMsgIds?: ReadonlySet<string>,
+  clearedUpToSeq = 0,
+): T[] => {
+  const byId = new Map<string, T>()
+  const keep = (item: T) =>
+    !(deletedClientMsgIds?.has(item.client_msg_id)) && item.seq > clearedUpToSeq
+
+  for (const item of cached) {
+    if (keep(item)) byId.set(item.client_msg_id, item)
+  }
+  for (const item of incoming) {
+    if (keep(item)) byId.set(item.client_msg_id, item)
+  }
+  return [...byId.values()].sort((a, b) => a.seq - b.seq)
+}
+
+/** Ambil satu halaman pesan (urut naik) dari kumpulan pesan lokal. */
+export const sliceMessagesPage = <T extends { seq: number }>(
+  messages: readonly T[],
+  beforeSeq?: number | null,
+  limit = CHAT_PAGE_SIZE,
+): { rows: T[]; hasOlder: boolean } => {
+  const safeLimit = Math.max(1, limit)
+  const filtered = beforeSeq != null ? messages.filter((m) => m.seq < beforeSeq) : [...messages]
+  filtered.sort((a, b) => a.seq - b.seq)
+  if (filtered.length <= safeLimit) {
+    return { rows: filtered, hasOlder: false }
+  }
+  return {
+    rows: filtered.slice(filtered.length - safeLimit),
+    hasOlder: true,
+  }
+}

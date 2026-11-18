@@ -1,5 +1,7 @@
 # dependencies
 node_modules/
+test_account.txt
+
 
 # secrets (jangan pernah di-commit; pakai .env.example sebagai template)
 .env

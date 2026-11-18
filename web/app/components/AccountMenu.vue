@@ -74,7 +74,7 @@ const logout = async () => {
         <strong>{{ name }}</strong>
         <span class="muted">@{{ account.me?.username }}</span>
       </div>
-      <NuxtLink to="/akun/profil" role="menuitem" @click="close">Edit profil</NuxtLink>
+      <NuxtLink to="/akun/profil" role="menuitem" @click="close">Profil &amp; penyimpanan</NuxtLink>
       <NuxtLink to="/akun/password" role="menuitem" @click="close">Ganti password</NuxtLink>
       <button
         v-if="notifyState.supported"

@@ -19,16 +19,16 @@ const SECURE_OPTIONS = { accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVI
 const VISITOR_SERVICE = 'seru24.visitor';
 const keyringService = (userId: string) => `seru24.keyring.${userId}`;
 
-const readSecure = async (service: string) => {
+export const readSecure = async (service: string) => {
   const result = await Keychain.getGenericPassword({ service });
   return result ? result.password : null;
 };
 
-const writeSecure = async (service: string, value: string) => {
+export const writeSecure = async (service: string, value: string) => {
   await Keychain.setGenericPassword('seru24', value, { service, ...SECURE_OPTIONS });
 };
 
-const removeSecure = (service: string) => Keychain.resetGenericPassword({ service });
+export const removeSecure = (service: string) => Keychain.resetGenericPassword({ service });
 
 const encodeKeyring = (ring: SecretKeyring) =>
   JSON.stringify(Object.fromEntries(Object.entries(ring).map(([v, k]) => [v, toBase64(k)])));

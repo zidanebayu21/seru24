@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
 import { formatTime, isIncomingRequest, peerLabel, type Conversation, type FoundUser } from '../../../web/shared/chat-core';
+import { loadLocalConversations, saveLocalConversations } from '../lib/chatStorage';
 import { account, inbox, listConversations, rpc } from '../lib/core';
 import { AccountMenu } from '../components/AccountMenu';
 import { Button } from '../components/Button';
@@ -21,10 +22,22 @@ export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
+    const myId = account.me?.id;
+    let hasCached = false;
+    if (myId) {
+      const cached = await loadLocalConversations(myId).catch(() => []);
+      if (cached.length > 0) {
+        hasCached = true;
+        setConversations(prev => (prev.length === 0 ? cached : prev));
+      }
+    }
     try {
-      setConversations(await listConversations());
+      const fresh = await listConversations();
+      setConversations(fresh);
+      setError('');
+      if (myId) saveLocalConversations(myId, fresh).catch(() => undefined);
     } catch {
-      setError('Gagal memuat percakapan');
+      if (!hasCached) setError('Gagal memuat percakapan');
     }
   }, []);
 
@@ -70,6 +83,7 @@ export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
       }
       const list = await listConversations();
       setConversations(list);
+      if (account.me?.id) saveLocalConversations(account.me.id, list).catch(() => undefined);
       const conversation = list.find(c => c.id === result.conversation_id);
       if (conversation) onOpen(conversation);
     } catch {

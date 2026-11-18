@@ -7,13 +7,21 @@ import {
   SEND_ERRORS,
   formatTime,
   isIncomingRequest,
+  mergeCachedMessages,
   mergePagedBubbles,
   oldestPersistedSeq,
   peerLabel,
+  sliceMessagesPage,
   type Conversation,
   type SendResult,
 } from '../../../web/shared/chat-core';
 import type { ChatMessage, PeerKeyStatus } from '../../../web/shared/e2ee-core';
+import {
+  clearLocalConversation,
+  deleteLocalMessage,
+  loadLocalConversationState,
+  saveLocalMessages,
+} from '../lib/chatStorage';
 import { account, e2ee, inbox, rpc } from '../lib/core';
 import { notifyMessageSent } from '../lib/notify';
 import { Button } from '../components/Button';
@@ -46,6 +54,10 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
   const [error, setError] = useState('');
   const listRef = useRef<FlatList<Bubble>>(null);
   const bubblesRef = useRef<Bubble[]>([]);
+  const allMessagesRef = useRef<ChatMessage[]>([]);
+  const deletedIdsRef = useRef<Set<string>>(new Set());
+  const clearedUpToSeqRef = useRef(0);
+  const serverExhaustedRef = useRef(false);
   const hasOlderRef = useRef(false);
   const loadingOlderRef = useRef(false);
   const peerId = conversation.peer_id;
@@ -85,17 +97,54 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
   useEffect(() => {
     let alive = true;
     (async () => {
+      const myId = account.me?.id ?? '';
       try {
-        setKeyStatus(await e2ee.checkPeerKey(peerId));
-        const rows = await rpc<ChatMessage[]>('seru24_get_messages', {
-          p_conversation_id: conversation.id,
-          p_limit: CHAT_PAGE_SIZE,
-        });
-        const list = await Promise.all(rows.reverse().map(toBubble));
+        const localState = myId
+          ? await loadLocalConversationState(myId, conversation.id)
+          : { messages: [], deletedIds: new Set<string>(), clearedUpToSeq: 0 };
         if (!alive) return;
-        hasOlderRef.current = rows.length === CHAT_PAGE_SIZE;
-        updateBubbles(() => list);
-        markRead(list.at(-1)?.seq ?? 0);
+        deletedIdsRef.current = localState.deletedIds;
+        clearedUpToSeqRef.current = localState.clearedUpToSeq;
+        allMessagesRef.current = localState.messages;
+
+        setKeyStatus(await e2ee.checkPeerKey(peerId));
+
+        if (allMessagesRef.current.length > 0) {
+          const initialSlice = sliceMessagesPage(allMessagesRef.current, null, CHAT_PAGE_SIZE);
+          const cachedList = await Promise.all(initialSlice.rows.map(toBubble));
+          if (!alive) return;
+          hasOlderRef.current = initialSlice.hasOlder;
+          updateBubbles(() => cachedList);
+        }
+
+        try {
+          const rows = await rpc<ChatMessage[]>('seru24_get_messages', {
+            p_conversation_id: conversation.id,
+            p_limit: CHAT_PAGE_SIZE,
+          });
+          if (!alive) return;
+          serverExhaustedRef.current = rows.length < CHAT_PAGE_SIZE;
+          const merged = mergeCachedMessages(
+            allMessagesRef.current,
+            rows,
+            deletedIdsRef.current,
+            clearedUpToSeqRef.current,
+          );
+          allMessagesRef.current = merged;
+          if (myId && rows.length > 0) {
+            await saveLocalMessages(myId, conversation.id, rows).catch(() => undefined);
+          }
+          const latestSlice = sliceMessagesPage(merged, null, CHAT_PAGE_SIZE);
+          const list = await Promise.all(latestSlice.rows.map(toBubble));
+          if (!alive) return;
+          hasOlderRef.current = latestSlice.hasOlder || !serverExhaustedRef.current;
+          updateBubbles(() => list);
+          markRead(list.at(-1)?.seq ?? 0);
+        } catch {
+          if (alive && allMessagesRef.current.length === 0) {
+            setError('Gagal memuat percakapan');
+          }
+        }
       } catch {
         if (alive) setError('Gagal memuat percakapan');
       }
@@ -107,7 +156,18 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         setPeerReadSeq(seq => Math.max(seq, Number(payload.seq) || 0));
         return;
       }
-      const bubble = await toBubble(payload as unknown as ChatMessage);
+      const msg = payload as unknown as ChatMessage;
+      if (deletedIdsRef.current.has(msg.client_msg_id) || msg.seq <= clearedUpToSeqRef.current) return;
+      const myId = account.me?.id ?? '';
+      allMessagesRef.current = mergeCachedMessages(
+        allMessagesRef.current,
+        [msg],
+        deletedIdsRef.current,
+        clearedUpToSeqRef.current,
+      );
+      if (myId) saveLocalMessages(myId, conversation.id, [msg]).catch(() => undefined);
+
+      const bubble = await toBubble(msg);
       updateBubbles(list => mergePagedBubbles([bubble], list));
       if (event === 'message_new') {
         // balasan pertama dari lawan bicara = permintaan chat kita diterima
@@ -131,13 +191,30 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     loadingOlderRef.current = true;
     setLoadingOlder(true);
     try {
-      const rows = await rpc<ChatMessage[]>('seru24_get_messages', {
-        p_conversation_id: conversation.id,
-        p_before_seq: beforeSeq,
-        p_limit: CHAT_PAGE_SIZE,
-      });
-      const older = await Promise.all(rows.reverse().map(toBubble));
-      hasOlderRef.current = rows.length === CHAT_PAGE_SIZE;
+      const myId = account.me?.id ?? '';
+      if (!serverExhaustedRef.current) {
+        const rows = await rpc<ChatMessage[]>('seru24_get_messages', {
+          p_conversation_id: conversation.id,
+          p_before_seq: beforeSeq,
+          p_limit: CHAT_PAGE_SIZE,
+        }).catch(() => null);
+        if (rows) {
+          if (rows.length < CHAT_PAGE_SIZE) serverExhaustedRef.current = true;
+          allMessagesRef.current = mergeCachedMessages(
+            allMessagesRef.current,
+            rows,
+            deletedIdsRef.current,
+            clearedUpToSeqRef.current,
+          );
+          if (myId && rows.length > 0) {
+            await saveLocalMessages(myId, conversation.id, rows).catch(() => undefined);
+          }
+        }
+      }
+
+      const page = sliceMessagesPage(allMessagesRef.current, beforeSeq, CHAT_PAGE_SIZE);
+      const older = await Promise.all(page.rows.map(toBubble));
+      hasOlderRef.current = page.hasOlder || !serverExhaustedRef.current;
       updateBubbles(curr => mergePagedBubbles(older, curr));
     } catch {
       // biarkan pengguna bisa coba scroll lagi saat jaringan pulih
@@ -155,7 +232,34 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     updateBubble(localKey, { key: params.p_client_msg_id });
     const result = await rpc<SendResult>('seru24_send_message', params);
     if (result.ok) {
-      updateBubble(params.p_client_msg_id, { id: result.id ?? null, seq: result.seq ?? 0, pending: false });
+      const createdAt = result.created_at ?? new Date().toISOString();
+      const seq = result.seq ?? 0;
+      const myId = account.me?.id ?? '';
+      const cachedMsg: ChatMessage = {
+        id: result.id ?? params.p_client_msg_id,
+        conversation_id: conversation.id,
+        sender_id: myId || null,
+        seq,
+        client_msg_id: params.p_client_msg_id,
+        kind: 'text',
+        ciphertext: params.p_ciphertext,
+        nonce: params.p_nonce,
+        sender_key_version: params.p_sender_key_version,
+        recipient_key_version: params.p_recipient_key_version,
+        reply_to: null,
+        created_at: createdAt,
+        edited_at: null,
+        deleted_at: null,
+        expires_at: null,
+      };
+      allMessagesRef.current = mergeCachedMessages(
+        allMessagesRef.current,
+        [cachedMsg],
+        deletedIdsRef.current,
+        clearedUpToSeqRef.current,
+      );
+      if (myId) saveLocalMessages(myId, conversation.id, [cachedMsg]).catch(() => undefined);
+      updateBubble(params.p_client_msg_id, { id: result.id ?? null, seq, createdAt, pending: false });
       if (result.id && result.code !== 'duplicate') {
         notifyMessageSent(conversation.id, result.id);
       }
@@ -203,6 +307,31 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     setKeyStatus(await e2ee.checkPeerKey(peerId));
   };
 
+  const removeMessageLocal = async (item: Bubble) => {
+    if (item.pending) return;
+    const myId = account.me?.id ?? '';
+    if (myId) {
+      await deleteLocalMessage(myId, conversation.id, item.key, item.seq).catch(() => undefined);
+    }
+    deletedIdsRef.current.add(item.key);
+    allMessagesRef.current = allMessagesRef.current.filter(m => m.client_msg_id !== item.key);
+    updateBubbles(list => list.filter(b => b.key !== item.key));
+  };
+
+  const clearChatLocally = async () => {
+    const myId = account.me?.id ?? '';
+    const maxSeq = bubblesRef.current.reduce((max, b) => (b.pending ? max : Math.max(max, b.seq)), 0);
+    const upTo = Math.max(maxSeq, clearedUpToSeqRef.current);
+    if (myId) {
+      await clearLocalConversation(myId, conversation.id, upTo).catch(() => undefined);
+    }
+    clearedUpToSeqRef.current = upTo;
+    deletedIdsRef.current.clear();
+    allMessagesRef.current = [];
+    hasOlderRef.current = false;
+    updateBubbles(() => []);
+  };
+
   const statusOf = (b: Bubble) => {
     if (b.pending) return 'mengirim…';
     if (b.failed) return b.failed;
@@ -222,6 +351,9 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
           <Text numberOfLines={1} style={{ fontWeight: '700', color: colors.text }}>{peerLabel(conversation)}</Text>
           <Text style={ui.muted}>@{conversation.peer_username} · terenkripsi end-to-end</Text>
         </View>
+        <Pressable onPress={clearChatLocally} style={{ padding: 8 }}>
+          <Text style={{ color: colors.danger }}>Hapus chat</Text>
+        </Pressable>
         <Pressable onPress={toggleBlock} style={{ padding: 8 }}>
           <Text style={{ color: colors.danger }}>{conversation.peer_blocked ? 'Buka blokir' : 'Blokir'}</Text>
         </Pressable>
@@ -274,7 +406,14 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
             ) : (
               <Text style={{ color: colors.text }}>{item.text}</Text>
             )}
-            <Text style={[ui.muted, { fontSize: 11, alignSelf: 'flex-end' }]}>{statusOf(item)}</Text>
+            <View style={[ui.row, { justifyContent: 'flex-end', gap: 10 }]}>
+              <Text style={[ui.muted, { fontSize: 11 }]}>{statusOf(item)}</Text>
+              {!item.pending ? (
+                <Pressable onPress={() => removeMessageLocal(item)}>
+                  <Text style={[ui.muted, { fontSize: 11, textDecorationLine: 'underline' }]}>Hapus lokal</Text>
+                </Pressable>
+              ) : null}
+            </View>
           </View>
         )}
       />

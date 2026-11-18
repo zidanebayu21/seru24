@@ -3,8 +3,10 @@ import { MAX_TEXT_LENGTH } from '#shared/crypto'
 import {
   CHAT_PAGE_SIZE,
   CHAT_PREFETCH_OFFSET,
+  mergeCachedMessages,
   mergePagedBubbles,
   oldestPersistedSeq,
+  sliceMessagesPage,
 } from '#shared/chat-core'
 
 interface Bubble {
@@ -30,6 +32,10 @@ const route = useRoute()
 const conversationId = route.params.id as string
 const conversation = ref<Conversation | null>(null)
 const bubbles = ref<Bubble[]>([])
+const allMessages = ref<ChatMessage[]>([])
+const deletedIds = ref<Set<string>>(new Set())
+const clearedUpToSeq = ref(0)
+const serverExhausted = ref(false)
 const peerReadSeq = ref(0)
 const keyStatus = ref<PeerKeyStatus>({ status: 'missing' })
 const draft = ref('')
@@ -75,18 +81,52 @@ const fetchPage = (beforeSeq?: number) =>
   })
 
 const load = async () => {
-  const list = await listConversations()
+  const myId = account.me?.id ?? ''
+  let list: Conversation[] = []
+  try {
+    list = await listConversations()
+    if (myId) saveLocalConversations(myId, list).catch(() => undefined)
+  } catch {
+    if (myId) list = await loadLocalConversations(myId).catch(() => [])
+  }
   conversation.value = list.find((c) => c.id === conversationId) ?? null
   if (!conversation.value) {
     await navigateTo('/chats')
     return
   }
+
+  const localState = myId
+    ? await loadLocalConversationState(myId, conversationId)
+    : { messages: [], deletedIds: new Set<string>(), clearedUpToSeq: 0 }
+  deletedIds.value = localState.deletedIds
+  clearedUpToSeq.value = localState.clearedUpToSeq
+  allMessages.value = localState.messages
+
   keyStatus.value = await checkPeerKey(peerId())
-  const rows = await fetchPage()
-  hasOlder.value = rows.length === CHAT_PAGE_SIZE
-  bubbles.value = await Promise.all(rows.reverse().map(toBubble))
-  await scrollToBottom()
-  markRead()
+
+  if (allMessages.value.length > 0) {
+    const initialSlice = sliceMessagesPage(allMessages.value, null, CHAT_PAGE_SIZE)
+    bubbles.value = await Promise.all(initialSlice.rows.map(toBubble))
+    hasOlder.value = initialSlice.hasOlder
+    await scrollToBottom()
+  }
+
+  try {
+    const rows = await fetchPage()
+    serverExhausted.value = rows.length < CHAT_PAGE_SIZE
+    const merged = mergeCachedMessages(allMessages.value, rows, deletedIds.value, clearedUpToSeq.value)
+    allMessages.value = merged
+    if (myId && rows.length > 0) {
+      await saveLocalMessages(myId, conversationId, rows).catch(() => undefined)
+    }
+    const latestSlice = sliceMessagesPage(merged, null, CHAT_PAGE_SIZE)
+    hasOlder.value = latestSlice.hasOlder || !serverExhausted.value
+    bubbles.value = await Promise.all(latestSlice.rows.map(toBubble))
+    await scrollToBottom()
+    markRead()
+  } catch {
+    if (allMessages.value.length === 0) throw new Error('Gagal memuat pesan')
+  }
 }
 
 const loadOlder = async () => {
@@ -98,12 +138,24 @@ const loadOlder = async () => {
   }
   loadingOlder.value = true
   try {
-    const rows = await fetchPage(beforeSeq)
-    const older = await Promise.all(rows.reverse().map(toBubble))
+    const myId = account.me?.id ?? ''
+    if (!serverExhausted.value) {
+      const rows = await fetchPage(beforeSeq).catch(() => null)
+      if (rows) {
+        if (rows.length < CHAT_PAGE_SIZE) serverExhausted.value = true
+        allMessages.value = mergeCachedMessages(allMessages.value, rows, deletedIds.value, clearedUpToSeq.value)
+        if (myId && rows.length > 0) {
+          await saveLocalMessages(myId, conversationId, rows).catch(() => undefined)
+        }
+      }
+    }
+
+    const page = sliceMessagesPage(allMessages.value, beforeSeq, CHAT_PAGE_SIZE)
+    const older = await Promise.all(page.rows.map(toBubble))
     const el = scroller.value
     const prevHeight = el?.scrollHeight ?? 0
     const prevTop = el?.scrollTop ?? 0
-    hasOlder.value = rows.length === CHAT_PAGE_SIZE
+    hasOlder.value = page.hasOlder || !serverExhausted.value
     bubbles.value = mergePagedBubbles(older, bubbles.value)
     await nextTick()
     if (el) el.scrollTop = prevTop + (el.scrollHeight - prevHeight)
@@ -125,6 +177,12 @@ const onMessagesScroll = () => {
 }
 
 const upsert = async (message: ChatMessage) => {
+  if (deletedIds.value.has(message.client_msg_id) || message.seq <= clearedUpToSeq.value) return
+  const myId = account.me?.id ?? ''
+  allMessages.value = mergeCachedMessages(allMessages.value, [message], deletedIds.value, clearedUpToSeq.value)
+  if (myId) {
+    saveLocalMessages(myId, conversationId, [message]).catch(() => undefined)
+  }
   const bubble = await toBubble(message)
   const index = bubbles.value.findIndex((b) => b.key === bubble.key)
   if (index >= 0) bubbles.value[index] = bubble
@@ -160,6 +218,26 @@ const sendText = async (text: string, bubble: Bubble, retry = false): Promise<vo
     bubble.seq = result.seq ?? bubble.seq
     bubble.createdAt = result.created_at ?? bubble.createdAt
     bubble.pending = false
+    const myId = account.me?.id ?? ''
+    const cachedMsg: ChatMessage = {
+      id: result.id ?? params.p_client_msg_id,
+      conversation_id: conversationId,
+      sender_id: myId || null,
+      seq: bubble.seq,
+      client_msg_id: params.p_client_msg_id,
+      kind: 'text',
+      ciphertext: params.p_ciphertext,
+      nonce: params.p_nonce,
+      sender_key_version: params.p_sender_key_version,
+      recipient_key_version: params.p_recipient_key_version,
+      reply_to: null,
+      created_at: bubble.createdAt,
+      edited_at: null,
+      deleted_at: null,
+      expires_at: null,
+    }
+    allMessages.value = mergeCachedMessages(allMessages.value, [cachedMsg], deletedIds.value, clearedUpToSeq.value)
+    if (myId) saveLocalMessages(myId, conversationId, [cachedMsg]).catch(() => undefined)
     if (result.id && result.code !== 'duplicate') {
       notifyMessageSent(conversationId, result.id)
     }
@@ -194,11 +272,27 @@ const send = async () => {
 }
 
 const removeMessage = async (bubble: Bubble) => {
-  if (!bubble.id) return
-  if (await rpc<boolean>('seru24_delete_message', { p_message_id: bubble.id }).catch(() => false)) {
-    bubble.deleted = true
-    bubble.text = null
+  if (bubble.pending) return
+  const myId = account.me?.id ?? ''
+  if (myId) {
+    await deleteLocalMessage(myId, conversationId, bubble.key, bubble.seq)
   }
+  deletedIds.value.add(bubble.key)
+  allMessages.value = allMessages.value.filter((m) => m.client_msg_id !== bubble.key)
+  bubbles.value = bubbles.value.filter((b) => b.key !== bubble.key)
+}
+
+const clearChatLocally = async () => {
+  const myId = account.me?.id ?? ''
+  const upTo = Math.max(lastSeq(), clearedUpToSeq.value)
+  if (myId) {
+    await clearLocalConversation(myId, conversationId, upTo)
+  }
+  clearedUpToSeq.value = upTo
+  deletedIds.value.clear()
+  allMessages.value = []
+  bubbles.value = []
+  hasOlder.value = false
 }
 
 const accept = async () => {
@@ -265,6 +359,9 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
         <button type="button" :disabled="!reportReason || reportDone" @click="report">
           {{ reportDone ? 'Terkirim' : 'Laporkan' }}
         </button>
+        <button type="button" class="danger" @click="clearChatLocally">
+          Hapus riwayat chat di browser ini
+        </button>
       </div>
     </section>
 
@@ -290,7 +387,7 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
         <p v-else class="text">{{ b.text }}</p>
         <div class="foot row">
           <span class="muted">{{ status(b) }}</span>
-          <button v-if="b.mine && b.id && !b.deleted" type="button" class="link" @click="removeMessage(b)">Hapus</button>
+          <button v-if="!b.pending" type="button" class="link" @click="removeMessage(b)">Hapus lokal</button>
         </div>
       </div>
     </div>

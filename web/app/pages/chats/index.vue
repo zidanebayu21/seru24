@@ -7,10 +7,17 @@ const error = ref('')
 const busy = ref(false)
 
 const load = async () => {
+  const myId = account.me?.id
+  if (myId && conversations.value.length === 0) {
+    const cached = await loadLocalConversations(myId).catch(() => [])
+    if (cached.length > 0) conversations.value = cached
+  }
   try {
-    conversations.value = await listConversations()
+    const fresh = await listConversations()
+    conversations.value = fresh
+    if (myId) saveLocalConversations(myId, fresh).catch(() => undefined)
   } catch {
-    error.value = 'Gagal memuat percakapan'
+    if (conversations.value.length === 0) error.value = 'Gagal memuat percakapan'
   }
 }
 

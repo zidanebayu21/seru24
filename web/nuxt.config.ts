@@ -27,6 +27,15 @@
     fcmProjectId: '',
     fcmClientEmail: '',
     fcmPrivateKey: '',
+    // Cron non-Vercel & SMTP untuk laporan statistik harian; isi via CRON_SECRET / NUXT_SMTP_* / SMTP_*.
+    cronSecret: '',
+    smtpHost: '',
+    smtpPort: '587',
+    smtpSecure: '',
+    smtpUser: '',
+    smtpPass: '',
+    smtpFrom: '',
+    smtpTargetEmail: '',
     public: {
       supabaseUrl: '',
       supabaseAnonKey: '',
