@@ -1,5 +1,6 @@
 import net from 'node:net'
 import tls from 'node:tls'
+import type { FileMaintenance } from './file-maintenance'
 
 export interface SmtpConfig {
   host: string
@@ -43,6 +44,25 @@ export interface DailyStatsReport {
     deleted_expired_messages: number
     deleted_rate_limits: number
   }
+  /** Dokumen di Google Drive; null bila perawatan dokumen gagal atau Drive belum dikonfigurasi. */
+  files?: FileMaintenance | null
+}
+
+/** Ukuran penyimpanan untuk laporan: MB di bawah 1 GB, GB di atasnya. */
+export const formatStorage = (bytes: number): string =>
+  bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(2)} GB` : `${(bytes / 1024 ** 2).toFixed(1)} MB`
+
+/** Baris ringkasan dokumen (label, nilai) untuk teks dan HTML laporan. */
+export const fileReportRows = (files: FileMaintenance | null | undefined): Array<[string, string]> => {
+  if (!files) return [['Dokumen', 'tidak tersedia (Drive belum dikonfigurasi atau gagal dibaca)']]
+  const drive = files.driveUsageBytes === null
+    ? 'tidak diketahui'
+    : `${formatStorage(files.driveUsageBytes)}${files.driveLimitBytes ? ` / ${formatStorage(files.driveLimitBytes)}` : ''}`
+  return [
+    ['Dokumen tersimpan', `${files.files} file · ${formatStorage(files.bytes)}`],
+    ['Pemakaian akun Google Drive', drive],
+    ['Dokumen yatim dibersihkan', `${files.cleaned}${files.cleanupFailed ? ` (gagal ${files.cleanupFailed})` : ''}`],
+  ]
 }
 
 const str = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
@@ -137,6 +157,9 @@ export const buildDailyStatsEmail = (report: DailyStatsReport, now = new Date())
     `- Pesan di server  : ${report.totals.messages}`,
     `- System logs      : ${report.totals.system_logs}`,
     `- Laporan terbuka  : ${report.totals.open_reports}`,
+    '',
+    'Dokumen (Google Drive):',
+    ...fileReportRows(report.files).map(([label, value]) => `- ${label}: ${value}`),
   ].join('\n')
 
   const row = (label: string, value: number | string) =>
@@ -177,6 +200,11 @@ export const buildDailyStatsEmail = (report: DailyStatsReport, now = new Date())
       ${row('Pesan tersimpan di Supabase', report.totals.messages)}
       ${row('Baris system_logs', report.totals.system_logs)}
       ${row('Laporan berstatus open', report.totals.open_reports)}
+    </table>
+
+    <h3 style="margin:20px 0 8px 0;font-size:16px;color:#0f172a;">Dokumen (Google Drive)</h3>
+    <table style="width:100%;border-collapse:collapse;font-size:14px;">
+      ${fileReportRows(report.files).map(([label, value]) => row(label, value)).join('\n      ')}
     </table>
   </div>
   <div style="background:#f8fafc;padding:10px;text-align:center;font-size:12px;color:#64748b;border-radius:0 0 8px 8px;">

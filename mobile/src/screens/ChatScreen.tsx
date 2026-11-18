@@ -6,13 +6,14 @@ import {
   CHAT_MOBILE_PREFETCH_SCREENS,
   CHAT_PAGE_SIZE,
   SEND_ERRORS,
-  formatTime,
+  bubbleStatus,
   isIncomingRequest,
   markMessageDeleted,
   mergeCachedMessages,
   mergePagedBubbles,
   oldestPersistedSeq,
   peerLabel,
+  replySnippet,
   sliceMessagesPage,
   type Conversation,
   type SendResult,
@@ -23,7 +24,8 @@ import {
   loadLocalConversationState,
   saveLocalMessages,
 } from '../lib/chatStorage';
-import { account, deleteRemoteFile, e2ee, inbox, rpc, whenAccountReady } from '../lib/core';
+import { account, deleteRemoteFile, e2ee, inbox, openConversationPresence, rpc, whenAccountReady } from '../lib/core';
+import type { PeerPresence } from '../../../web/shared/presence-core';
 import { downloadFile, findSavedFile, openSavedFile, pickFiles, uploadFile, type PickedFile } from '../lib/files';
 import { notifyMessageSent } from '../lib/notify';
 import { Button } from '../components/Button';
@@ -45,9 +47,11 @@ interface Bubble {
   progress: string;
   /** File sudah diunduh ke HP: tombol jadi "Buka" (tanpa unduh ulang). */
   savedUri: string | null;
+  /** id pesan yang dibalas (kolom reply_to). */
+  replyTo: string | null;
 }
 
-type SendParams = Awaited<ReturnType<typeof e2ee.encryptText>> & { p_attachment_id?: string };
+type SendParams = Awaited<ReturnType<typeof e2ee.encryptText>> & { p_attachment_id?: string; p_reply_to?: string | null };
 
 const SAVED_NOTE = 'Tersimpan di Download/seru24';
 
@@ -64,6 +68,9 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [keyStatus, setKeyStatus] = useState<PeerKeyStatus>({ status: 'missing' });
   const [peerReadSeq, setPeerReadSeq] = useState(0);
+  const [replyingTo, setReplyingTo] = useState<Bubble | null>(null);
+  const [peerPresence, setPeerPresence] = useState<PeerPresence>({ online: false, typing: false });
+  const presenceRef = useRef<ReturnType<typeof openConversationPresence>>(null);
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
@@ -104,6 +111,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     pending: false,
     failed: '',
     ...(await fileState(m)),
+    replyTo: m.reply_to,
   }), [peerId, fileState]);
 
   const markRead = useCallback((seq: number) => {
@@ -136,6 +144,11 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         if (!alive) return;
         setPreparing(false);
         if (ready !== 'ready') return;
+        presenceRef.current = openConversationPresence(conversation.id, setPeerPresence);
+        // centang dua tetap benar setelah chat dibuka ulang
+        rpc<number>('seru24_peer_read_seq', { p_conversation_id: conversation.id })
+          .then(seq => setPeerReadSeq(prev => Math.max(prev, Number(seq) || 0)))
+          .catch(() => undefined);
 
         setKeyStatus(await e2ee.checkPeerKey(peerId));
 
@@ -200,6 +213,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
       const bubble = await toBubble(msg);
       updateBubbles(list => mergePagedBubbles([bubble], list));
       if (event === 'message_new') {
+        if (!bubble.mine) presenceRef.current?.clearPeerTyping();
         // balasan pertama dari lawan bicara = permintaan chat kita diterima
         setConversation(c => (c.status === 'pending' && payload.sender_id === c.peer_id ? { ...c, status: 'accepted' } : c));
         if (!bubble.mine) markRead(bubble.seq);
@@ -208,6 +222,8 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     return () => {
       alive = false;
       stop();
+      presenceRef.current?.close();
+      presenceRef.current = null;
     };
   }, [conversation.id, peerId, toBubble, markRead, updateBubbles]);
 
@@ -276,7 +292,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         nonce: params.p_nonce,
         sender_key_version: params.p_sender_key_version,
         recipient_key_version: params.p_recipient_key_version,
-        reply_to: null,
+        reply_to: params.p_reply_to ?? null,
         created_at: createdAt,
         edited_at: null,
         deleted_at: null,
@@ -307,20 +323,22 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     if (!text) return;
     setDraft('');
     setError('');
-    const localKey = addLocalBubble(text);
+    const replyTo = replyingTo?.id ?? null;
+    setReplyingTo(null);
+    const localKey = addLocalBubble(text, replyTo);
     try {
-      await deliver(retry => e2ee.encryptText(conversation.id, peerId, text, retry), localKey);
+      await deliver(async retry => ({ ...(await e2ee.encryptText(conversation.id, peerId, text, retry)), p_reply_to: replyTo }), localKey);
       if (isIncomingRequest(conversation, account.me?.id)) setConversation(c => ({ ...c, status: 'accepted' }));
     } catch (e) {
       updateBubbles(list => list.map(b => (b.pending && b.text === text ? { ...b, pending: false, failed: e instanceof Error ? e.message : 'Pesan gagal dikirim' } : b)));
     }
   };
 
-  const addLocalBubble = (text: string) => {
+  const addLocalBubble = (text: string, replyTo: string | null = null) => {
     const localKey = `local-${randomId()}`;
     updateBubbles(list => [...list, {
       key: localKey, id: null, seq: 0, mine: true, text, createdAt: new Date().toISOString(),
-      deleted: false, pending: true, failed: '', file: null, progress: '', savedUri: null,
+      deleted: false, pending: true, failed: '', file: null, progress: '', savedUri: null, replyTo,
     }]);
     listRef.current?.scrollToOffset({ offset: 0, animated: true });
     return localKey;
@@ -429,11 +447,20 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     action().catch(() => undefined);
   };
 
-  const statusOf = (b: Bubble) => {
-    if (b.pending) return 'mengirim…';
-    if (b.failed) return b.failed;
-    return b.mine && b.seq <= peerReadSeq ? 'dibaca' : formatTime(b.createdAt);
+  /** Pesan yang dikutip (bila sudah termuat) beserta nama pengirimnya. */
+  const quoteOf = (b: Bubble) => {
+    const target = b.replyTo ? bubblesRef.current.find(x => x.id === b.replyTo) : undefined;
+    return { who: !target ? '' : target.mine ? 'Anda' : peerLabel(conversation), snippet: replySnippet(target) };
   };
+
+  const onDraftChange = (text: string) => {
+    setDraft(text);
+    if (text) presenceRef.current?.notifyTyping();
+  };
+
+  const subtitle = peerPresence.typing
+    ? 'sedang mengetik…'
+    : `@${conversation.peer_username} · ${peerPresence.online ? 'online' : 'terenkripsi end-to-end'}`;
 
   const cannotSend = keyStatus.status === 'missing' || conversation.peer_blocked;
   const reversedBubbles = useMemo(() => [...bubbles].reverse(), [bubbles]);
@@ -446,7 +473,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         </Pressable>
         <View style={{ flex: 1 }}>
           <Text numberOfLines={1} style={{ fontWeight: '700', color: colors.text }}>{peerLabel(conversation)}</Text>
-          <Text style={ui.muted}>@{conversation.peer_username} · terenkripsi end-to-end</Text>
+          <Text style={[ui.muted, peerPresence.typing ? { color: colors.accent, fontStyle: 'italic' } : null]}>{subtitle}</Text>
         </View>
         <Pressable
           accessibilityRole="button"
@@ -506,6 +533,12 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         }
         renderItem={({ item }) => (
           <View style={[styles.bubble, item.mine ? styles.mine : styles.theirs, item.failed ? { borderColor: colors.danger } : null]}>
+            {item.replyTo && !item.deleted ? (
+              <View style={styles.quote}>
+                {quoteOf(item).who ? <Text style={styles.quoteWho}>{quoteOf(item).who}</Text> : null}
+                <Text style={[ui.muted, { fontSize: 12 }]} numberOfLines={2}>{quoteOf(item).snippet}</Text>
+              </View>
+            ) : null}
             {item.deleted ? (
               <Text style={ui.muted}>Pesan dihapus</Text>
             ) : item.text === null ? (
@@ -533,7 +566,19 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
             )}
             {item.progress ? <Text style={[ui.muted, { fontSize: 12 }]}>{item.progress}</Text> : null}
             <View style={[ui.row, { justifyContent: 'flex-end', gap: 10 }]}>
-              <Text style={[ui.muted, { fontSize: 11 }]}>{statusOf(item)}</Text>
+              <Text style={[ui.muted, { fontSize: 11 }]}>{bubbleStatus(item, peerReadSeq).text}</Text>
+              {bubbleStatus(item, peerReadSeq).ticks ? (
+                <Text
+                  accessibilityLabel={bubbleStatus(item, peerReadSeq).read ? 'Dibaca' : 'Terkirim'}
+                  style={[styles.ticks, bubbleStatus(item, peerReadSeq).read ? styles.ticksRead : null]}>
+                  {bubbleStatus(item, peerReadSeq).ticks}
+                </Text>
+              ) : null}
+              {item.id && !item.pending && !item.deleted ? (
+                <Pressable onPress={() => setReplyingTo(item)} accessibilityRole="button" accessibilityLabel="Balas pesan" hitSlop={8}>
+                  <Text style={[ui.muted, { fontSize: 14, lineHeight: 14 }]}>↩</Text>
+                </Pressable>
+              ) : null}
               {item.mine && item.id && !item.deleted ? (
                 <Pressable
                   onPress={() => removeMessage(item)}
@@ -548,6 +593,17 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         )}
       />
 
+      {replyingTo ? (
+        <View style={styles.replying}>
+          <View style={[styles.quote, { flex: 1, marginBottom: 0 }]}>
+            <Text style={styles.quoteWho}>Membalas {replyingTo.mine ? 'diri sendiri' : peerLabel(conversation)}</Text>
+            <Text style={[ui.muted, { fontSize: 12 }]} numberOfLines={2}>{replySnippet(replyingTo)}</Text>
+          </View>
+          <Pressable onPress={() => setReplyingTo(null)} accessibilityRole="button" accessibilityLabel="Batal membalas" hitSlop={8}>
+            <Text style={[ui.muted, { fontSize: 16 }]}>✕</Text>
+          </Pressable>
+        </View>
+      ) : null}
       <View style={styles.composer}>
         <Pressable
           onPress={attachFiles}
@@ -561,7 +617,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         <TextInput
           style={[ui.input, { flex: 1, maxHeight: 120 }]}
           value={draft}
-          onChangeText={setDraft}
+          onChangeText={onDraftChange}
           placeholder="Tulis pesan"
           multiline
           editable={!cannotSend}
@@ -589,6 +645,11 @@ const styles = StyleSheet.create({
   olderLoader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 8 },
   mine: { alignSelf: 'flex-end', backgroundColor: colors.mine },
   theirs: { alignSelf: 'flex-start', backgroundColor: colors.surface },
+  quote: { borderLeftWidth: 3, borderLeftColor: '#14b8a6', backgroundColor: 'rgba(15,118,110,0.08)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, marginBottom: 4 },
+  quoteWho: { color: colors.accent, fontWeight: '700', fontSize: 12 },
+  replying: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingTop: 6 },
+  ticks: { fontSize: 11, color: colors.muted, letterSpacing: -2 },
+  ticksRead: { color: '#0d9488', fontWeight: '700' },
   docButton: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: colors.border },
   composer: {
     flexDirection: 'row',

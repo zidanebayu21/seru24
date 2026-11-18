@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildDailyStatsEmail, parseSmtpConfig, type DailyStatsReport } from './smtp'
+import { buildDailyStatsEmail, fileReportRows, formatStorage, parseSmtpConfig, type DailyStatsReport } from './smtp'
 
 describe('smtp daily stats helper', () => {
   it('membaca konfigurasi SMTP dan menentukan mode secure dari port 465 vs 587', () => {
@@ -75,5 +75,19 @@ describe('smtp daily stats helper', () => {
     expect(email.text).toContain('Pesan terkirim   : 245')
     expect(email.html).toContain('410 MB / 400 MB')
     expect(email.html).toContain('620 log &amp; 380 pesan tertua dieliminasi')
+  })
+
+  it('merangkum dokumen Google Drive di laporan', () => {
+    expect(formatStorage(52_428_800)).toBe('50.0 MB')
+    expect(formatStorage(3 * 1024 ** 3)).toBe('3.00 GB')
+    expect(fileReportRows({
+      files: 4, bytes: 60 * 1024 ** 2, cleaned: 2, cleanupFailed: 1,
+      driveUsageBytes: 2 * 1024 ** 3, driveLimitBytes: 5 * 1024 ** 4,
+    })).toEqual([
+      ['Dokumen tersimpan', '4 file · 60.0 MB'],
+      ['Pemakaian akun Google Drive', '2.00 GB / 5120.00 GB'],
+      ['Dokumen yatim dibersihkan', '2 (gagal 1)'],
+    ])
+    expect(fileReportRows(null)[0]![0]).toBe('Dokumen')
   })
 })

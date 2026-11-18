@@ -32,6 +32,10 @@ const version = [
   `export const APP_VERSION_CODE = ${Number(/versionCode\s+(\d+)/.exec(gradle)?.[1] ?? 0)};`,
   `export const APP_VERSION_NAME = ${JSON.stringify(/versionName\s+"([^"]+)"/.exec(gradle)?.[1] ?? '0')};`,
 ];
-const body = [...strings, ...numbers, ...version].join('\n');
+// saklar opsional (default aktif): REALTIME_PRESENCE=false mematikan status online & mengetik bila kuota Realtime habis
+const flags = Object.entries({ REALTIME_PRESENCE: true }).map(
+  ([key, fallback]) => `export const ${key} = ${values[key] ? values[key].toLowerCase() !== 'false' : fallback};`,
+);
+const body = [...strings, ...numbers, ...version, ...flags].join('\n');
 fs.writeFileSync(path.join(__dirname, '..', 'src', 'env.ts'), `// Dibuat otomatis oleh scripts/gen-env.js. Jangan diedit.\n${body}\n`);
 console.log('gen-env: src/env.ts diperbarui');

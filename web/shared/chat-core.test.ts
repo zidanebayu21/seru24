@@ -3,10 +3,12 @@ import {
   CHAT_MOBILE_PREFETCH_SCREENS,
   CHAT_PAGE_SIZE,
   CHAT_PREFETCH_OFFSET,
+  bubbleStatus,
   markMessageDeleted,
   mergeCachedMessages,
   mergePagedBubbles,
   oldestPersistedSeq,
+  replySnippet,
   sliceMessagesPage,
 } from './chat-core'
 
@@ -91,5 +93,21 @@ describe('paginasi pesan', () => {
       rows: [{ seq: 1 }, { seq: 2 }],
       hasOlder: false,
     })
+  })
+
+  it('status pesan sendiri: centang satu terkirim, centang dua dibaca', () => {
+    const base = { pending: false, failed: '', mine: true, seq: 5, createdAt: new Date().toISOString() }
+    expect(bubbleStatus(base, 4)).toMatchObject({ ticks: '✓', read: false })
+    expect(bubbleStatus(base, 5)).toMatchObject({ ticks: '✓✓', read: true })
+    expect(bubbleStatus({ ...base, mine: false }, 9).ticks).toBe('')
+    expect(bubbleStatus({ ...base, pending: true }, 9).text).toBe('mengirim…')
+    expect(bubbleStatus({ ...base, failed: 'Gagal' }, 9)).toMatchObject({ text: 'Gagal', ticks: '' })
+  })
+
+  it('cuplikan pesan yang dibalas', () => {
+    expect(replySnippet({ text: 'halo\n  apa kabar', deleted: false })).toBe('halo apa kabar')
+    expect(replySnippet({ text: 'x'.repeat(100), deleted: false })).toHaveLength(81)
+    expect(replySnippet({ text: 'rahasia', deleted: true })).toBe('Pesan dihapus')
+    expect(replySnippet(null)).toBe('Pesan sebelumnya')
   })
 })

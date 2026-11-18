@@ -147,6 +147,14 @@ export const downloadRange = async (
 /** Penanda file APK rilis di Drive (appProperties), diisi release_apk.ps1. */
 export const APK_KIND_PROPERTY = { key: 'seru24_kind', value: 'android_apk' } as const
 
+/** Pemakaian ruang akun Drive penyimpanan (byte); limit null bila tanpa batas. */
+export const driveQuota = async (config: DriveConfig): Promise<{ usage: number; limit: number | null }> => {
+  const res = await driveFetch(config, `${API}/about?fields=storageQuota(usage,limit)`)
+  if (!res.ok) throw await failure(res, 'kuota')
+  const quota = ((await res.json()) as { storageQuota: { usage?: string; limit?: string } }).storageQuota
+  return { usage: Number(quota.usage ?? 0), limit: quota.limit ? Number(quota.limit) : null }
+}
+
 /** APK Android terbaru di Drive akun penyimpanan; null bila belum pernah dirilis. */
 export const findApkRelease = async (config: DriveConfig): Promise<AppRelease | null> => {
   const q = `appProperties has { key='${APK_KIND_PROPERTY.key}' and value='${APK_KIND_PROPERTY.value}' } and trashed = false`

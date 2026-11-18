@@ -140,3 +140,32 @@ export const sliceMessagesPage = <T extends { seq: number }>(
     hasOlder: true,
   }
 }
+
+export interface StatusBubble {
+  pending: boolean
+  failed: string
+  mine: boolean
+  seq: number
+  createdAt: string
+}
+
+/** Status di bawah gelembung: jam, lalu ✓ (terkirim ke server) atau ✓✓ (sudah dibaca lawan) untuk pesan sendiri. */
+export const bubbleStatus = (b: StatusBubble, peerReadSeq: number): { text: string; ticks: '' | '✓' | '✓✓'; read: boolean } => {
+  if (b.pending) return { text: 'mengirim…', ticks: '', read: false }
+  if (b.failed) return { text: b.failed, ticks: '', read: false }
+  const text = formatTime(b.createdAt)
+  if (!b.mine) return { text, ticks: '', read: false }
+  const read = b.seq > 0 && b.seq <= peerReadSeq
+  return { text, ticks: read ? '✓✓' : '✓', read }
+}
+
+export const REPLY_SNIPPET_LENGTH = 80
+
+/** Cuplikan pesan yang dibalas (teks sudah didekripsi di perangkat; server hanya menyimpan reply_to). */
+export const replySnippet = (target: { text: string | null; deleted: boolean } | null | undefined): string => {
+  if (!target) return 'Pesan sebelumnya'
+  if (target.deleted) return 'Pesan dihapus'
+  if (target.text === null) return 'Pesan tidak dapat dibuka'
+  const text = target.text.replace(/\s+/g, ' ').trim()
+  return text.length > REPLY_SNIPPET_LENGTH ? `${text.slice(0, REPLY_SNIPPET_LENGTH)}…` : text
+}

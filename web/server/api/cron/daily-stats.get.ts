@@ -1,6 +1,6 @@
 /**
  * Endpoint cron non-Vercel untuk merekap daily_stats, mengeliminasi 1000 data tertua
- * bila DB Supabase >= 400 MB, lalu mengirim email ringkasan harian (opsional).
+ * bila DB Supabase >= 400 MB, membersihkan dokumen yatim di Google Drive, lalu mengirim email ringkasan (opsional).
  *
  * Dapat dipanggil oleh GitHub Actions, cron-job.org, atau manual dengan header
  * `Authorization: Bearer <CRON_SECRET>`. Tanpa CRON_SECRET endpoint selalu menolak (gagal tertutup);
@@ -26,6 +26,8 @@ export default defineLoggedHandler(async (event) => {
   }
 
   const report = data as DailyStatsReport
+  // perawatan dokumen tidak boleh menggagalkan rekap statistik; kegagalannya cukup tercatat di laporan
+  report.files = await runFileMaintenance(event, dryRun).catch(() => null)
   const smtp = parseSmtpConfig(config as unknown as Record<string, unknown>)
 
   let emailSent = false

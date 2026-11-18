@@ -47,6 +47,9 @@
       supabaseAnonKey: '',
       // OWASP ASVS V2.1.1 mensyaratkan minimal 12; NUXT_PUBLIC_PASSWORD_MIN_LENGTH hanya untuk masa uji
       passwordMinLength: 12,
+      // status online & "sedang mengetik…" (Supabase Realtime presence); NUXT_PUBLIC_REALTIME_PRESENCE=false untuk
+      // mematikan bila kuota pesan Realtime tier gratis mulai habis
+      realtimePresence: true,
     },
   },
 

@@ -9,8 +9,9 @@ import { createSessionCore } from '../../../web/shared/session-core';
 import { createAccountCore, type AccountState, type AccountStatus, type Me } from '../../../web/shared/account-core';
 import { createE2ee } from '../../../web/shared/e2ee-core';
 import { createInbox } from '../../../web/shared/inbox-core';
+import { createConversationPresence, type PeerPresence } from '../../../web/shared/presence-core';
 import type { Conversation } from '../../../web/shared/chat-core';
-import { API_BASE_URL, SUPABASE_ANON_KEY, SUPABASE_URL } from '../env';
+import { API_BASE_URL, REALTIME_PRESENCE, SUPABASE_ANON_KEY, SUPABASE_URL } from '../env';
 import { installNativeScrypt } from './nativeScrypt';
 
 // ---- Penyimpanan aman: Android Keystore / iOS Keychain (OWASP MASVS-STORAGE) ----
@@ -123,6 +124,12 @@ export const e2ee = createE2ee({
 });
 
 export const inbox = createInbox(getSupabase, () => account.me?.id);
+
+/** Status online & mengetik lawan di percakapan ini; null bila dimatikan lewat REALTIME_PRESENCE=false. */
+export const openConversationPresence = (conversationId: string, onChange: (state: PeerPresence) => void) =>
+  REALTIME_PRESENCE && account.me?.id
+    ? createConversationPresence(getSupabase(), conversationId, account.me.id, onChange)
+    : null;
 
 export const listConversations = () => rpc<Conversation[]>('seru24_list_conversations');
 

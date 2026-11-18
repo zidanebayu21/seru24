@@ -3,13 +3,16 @@ import { MAX_TEXT_LENGTH, randomId } from '#shared/crypto'
 import {
   CHAT_PAGE_SIZE,
   CHAT_PREFETCH_OFFSET,
+  bubbleStatus,
   compareBubbles,
   markMessageDeleted,
   mergeCachedMessages,
   mergePagedBubbles,
   oldestPersistedSeq,
+  replySnippet,
   sliceMessagesPage,
 } from '#shared/chat-core'
+import { createConversationPresence, type PeerPresence } from '#shared/presence-core'
 import { MAX_FILE_BYTES, formatFileSize, safeFileName, type FileMessageBody } from '#shared/file-core'
 
 interface Bubble {
@@ -25,9 +28,11 @@ interface Bubble {
   file: FileMessageBody | null
   /** Status unggah/unduh dokumen yang sedang berjalan. */
   progress: string
+  /** id pesan yang dibalas (kolom reply_to). */
+  replyTo: string | null
 }
 
-type SendParams = Awaited<ReturnType<typeof encryptText>> & { p_attachment_id?: string }
+type SendParams = Awaited<ReturnType<typeof encryptText>> & { p_attachment_id?: string; p_reply_to?: string | null }
 
 const REPORT_REASONS = [
   { value: 'spam', label: 'Spam' },
@@ -55,6 +60,9 @@ const reportReason = ref('')
 const reportDone = ref(false)
 const scroller = ref<HTMLElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
+const replyingTo = ref<Bubble | null>(null)
+const peerPresence = ref<PeerPresence>({ online: false, typing: false })
+let presence: ReturnType<typeof createConversationPresence> | null = null
 
 const peerId = () => conversation.value?.peer_id ?? ''
 
@@ -70,14 +78,30 @@ const toBubble = async (m: ChatMessage): Promise<Bubble> => ({
   failed: '',
   file: await decryptFile(m, peerId()),
   progress: '',
+  replyTo: m.reply_to,
 })
 
 const percent = (done: number, total: number) => `${Math.round((done / Math.max(total, 1)) * 100)}%`
 
-const localBubble = (text: string): Bubble => reactive<Bubble>({
+const localBubble = (text: string, replyTo: string | null = null): Bubble => reactive<Bubble>({
   key: `local-${randomId()}`, id: null, seq: 0, mine: true, text,
-  createdAt: new Date().toISOString(), deleted: false, pending: true, failed: '', file: null, progress: '',
+  createdAt: new Date().toISOString(), deleted: false, pending: true, failed: '', file: null, progress: '', replyTo,
 })
+
+/** Pesan yang dikutip (bila sudah termuat di layar) beserta nama pengirimnya. */
+const quoteOf = (b: Bubble) => {
+  const target = b.replyTo ? bubbles.value.find((x) => x.id === b.replyTo) : undefined
+  const who = !target ? '' : target.mine ? 'Anda' : peerLabel(conversation.value!)
+  return { who, snippet: replySnippet(target) }
+}
+
+/** Status mengetik/online lawan (channel conv:<id>); bisa dimatikan lewat NUXT_PUBLIC_REALTIME_PRESENCE=false. */
+const startPresence = () => {
+  const myId = account.me?.id
+  if (!myId || !useRuntimeConfig().public.realtimePresence) return
+  presence = createConversationPresence(useSupabase(), conversationId, myId, (state) => { peerPresence.value = state })
+}
+onBeforeUnmount(() => presence?.close())
 
 const scrollToBottom = async () => {
   await nextTick()
@@ -112,6 +136,11 @@ const load = async () => {
     await navigateTo('/chats')
     return
   }
+  startPresence()
+  // centang dua tetap benar setelah halaman dimuat ulang
+  rpc<number>('seru24_peer_read_seq', { p_conversation_id: conversationId })
+    .then((seq) => { peerReadSeq.value = Math.max(peerReadSeq.value, Number(seq) || 0) })
+    .catch(() => undefined)
 
   const localState = myId
     ? await loadLocalConversationState(myId, conversationId)
@@ -216,6 +245,7 @@ const stopInbox = onInbox(async (event, payload) => {
   }
   await upsert(payload as unknown as ChatMessage)
   if (event === 'message_new') {
+    if (payload.sender_id !== account.me?.id) presence?.clearPeerTyping()
     const c = conversation.value
     // balasan pertama dari lawan bicara = permintaan chat kita diterima
     if (c?.status === 'pending' && payload.sender_id === c.peer_id && c.requested_by === account.me?.id) {
@@ -248,7 +278,7 @@ const deliver = async (build: (retry: boolean) => Promise<SendParams>, bubble: B
       nonce: params.p_nonce,
       sender_key_version: params.p_sender_key_version,
       recipient_key_version: params.p_recipient_key_version,
-      reply_to: null,
+      reply_to: params.p_reply_to ?? null,
       created_at: bubble.createdAt,
       edited_at: null,
       deleted_at: null,
@@ -274,11 +304,13 @@ const send = async () => {
   if (!text || !conversation.value) return
   draft.value = ''
   error.value = ''
-  const bubble = localBubble(text)
+  const replyTo = replyingTo.value?.id ?? null
+  replyingTo.value = null
+  const bubble = localBubble(text, replyTo)
   bubbles.value.push(bubble)
   await scrollToBottom()
   try {
-    await deliver((retry) => encryptText(conversationId, peerId(), text, retry), bubble)
+    await deliver(async (retry) => ({ ...(await encryptText(conversationId, peerId(), text, retry)), p_reply_to: replyTo }), bubble)
     if (isIncomingRequest(conversation.value)) conversation.value.status = 'accepted'
   } catch (e) {
     bubble.pending = false
@@ -389,11 +421,18 @@ const trustNewKey = async () => {
   keyStatus.value = await checkPeerKey(peerId())
 }
 
-const status = (b: Bubble) => {
-  if (b.pending) return 'mengirim…'
-  if (b.failed) return b.failed
-  return b.mine && b.seq <= peerReadSeq.value ? 'dibaca' : formatTime(b.createdAt)
+const status = (b: Bubble) => bubbleStatus(b, peerReadSeq.value)
+
+const startReply = (b: Bubble) => {
+  replyingTo.value = b
+  nextTick(() => document.querySelector<HTMLTextAreaElement>('.composer textarea')?.focus())
 }
+
+const subtitle = computed(() => {
+  if (peerPresence.value.typing) return 'sedang mengetik…'
+  const handle = `@${conversation.value?.peer_username ?? ''}`
+  return peerPresence.value.online ? `${handle} · online` : `${handle} · terenkripsi end-to-end`
+})
 
 onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
 </script>
@@ -404,7 +443,7 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
       <NuxtLink to="/chats" class="back" aria-label="Kembali">←</NuxtLink>
       <div class="who">
         <strong>{{ peerLabel(conversation) }}</strong>
-        <p class="muted">@{{ conversation.peer_username }} · terenkripsi end-to-end</p>
+        <p class="muted" :class="{ typing: peerPresence.typing }">{{ subtitle }}</p>
       </div>
       <button type="button" @click="showSafety = !showSafety">Keamanan</button>
     </header>
@@ -448,6 +487,10 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
       <p v-if="loadingOlder" class="older muted">Memuat pesan lama…</p>
       <button v-else-if="hasOlder" type="button" class="older" @click="loadOlder">Muat pesan lama</button>
       <div v-for="b in bubbles" :key="b.key" class="bubble" :class="{ mine: b.mine, failed: b.failed }">
+        <div v-if="b.replyTo && !b.deleted" class="quote">
+          <strong v-if="quoteOf(b).who">{{ quoteOf(b).who }}</strong>
+          <span>{{ quoteOf(b).snippet }}</span>
+        </div>
         <p v-if="b.deleted" class="muted"><em>Pesan dihapus</em></p>
         <p v-else-if="b.text === null" class="muted"><em>Pesan tidak dapat dibuka</em></p>
         <div v-else-if="b.file" class="doc row">
@@ -461,7 +504,21 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
         <p v-else class="text">{{ b.text }}</p>
         <p v-if="b.progress" class="muted progress">{{ b.progress }}</p>
         <div class="foot row">
-          <span class="muted">{{ status(b) }}</span>
+          <span class="muted">{{ status(b).text }}</span>
+          <span
+            v-if="status(b).ticks"
+            class="ticks"
+            :class="{ read: status(b).read }"
+            :aria-label="status(b).read ? 'Dibaca' : 'Terkirim'"
+          >{{ status(b).ticks }}</span>
+          <button
+            v-if="b.id && !b.pending && !b.deleted"
+            type="button"
+            class="icon-reply"
+            aria-label="Balas pesan"
+            title="Balas"
+            @click="startReply(b)"
+          >↩</button>
           <button
             v-if="b.mine && b.id && !b.deleted"
             type="button"
@@ -475,6 +532,13 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
     </div>
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
+    <div v-if="replyingTo" class="replying row">
+      <div class="quote grow">
+        <strong>Membalas {{ replyingTo.mine ? 'diri sendiri' : peerLabel(conversation) }}</strong>
+        <span>{{ replySnippet(replyingTo) }}</span>
+      </div>
+      <button type="button" class="icon-del" aria-label="Batal membalas" title="Batal" @click="replyingTo = null">&times;</button>
+    </div>
     <form class="composer row" @submit.prevent="send">
       <input ref="fileInput" type="file" multiple hidden @change="onFilesPicked">
       <button
@@ -492,6 +556,7 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
         placeholder="Tulis pesan"
         :disabled="keyStatus.status === 'missing' || conversation.peer_blocked"
         @keydown.enter.exact.prevent="send"
+        @input="presence?.notifyTyping()"
       />
       <button class="primary" type="submit" :disabled="!draft.trim() || keyStatus.status === 'missing'">Kirim</button>
     </form>
@@ -542,6 +607,15 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
 .foot .muted { font-size: 11px; }
 .icon-del { padding: 0 2px; border: 0; background: none; color: var(--muted); font-size: 15px; line-height: 1; cursor: pointer; }
 .icon-del:hover { color: var(--danger); }
+.icon-reply { padding: 0 2px; border: 0; background: none; color: var(--muted); font-size: 14px; line-height: 1; cursor: pointer; }
+.icon-reply:hover { color: var(--accent, #0f766e); }
+.ticks { font-size: 12px; letter-spacing: -3px; color: var(--muted); margin-right: 2px; }
+.ticks.read { color: #0d9488; font-weight: 700; }
+.quote { display: flex; flex-direction: column; gap: 1px; padding: 4px 8px; margin-bottom: 4px; border-left: 3px solid #14b8a6; border-radius: 6px; background: rgba(15, 118, 110, 0.08); font-size: 12px; overflow-wrap: anywhere; }
+.quote strong { color: #0f766e; }
+.replying { gap: 8px; align-items: center; }
+.replying .grow { flex: 1; min-width: 0; margin-bottom: 0; }
+.typing { color: #0f766e; font-style: italic; }
 .composer textarea { flex: 1; resize: none; max-height: 140px; }
 .attach { padding: 6px 10px; font-size: 18px; line-height: 1; }
 .doc { gap: 10px; align-items: center; }
