@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { MAX_TEXT_LENGTH } from '#shared/crypto'
+import { MAX_TEXT_LENGTH, randomId } from '#shared/crypto'
 import {
   CHAT_PAGE_SIZE,
   CHAT_PREFETCH_OFFSET,
+  compareBubbles,
   markMessageDeleted,
   mergeCachedMessages,
   mergePagedBubbles,
   oldestPersistedSeq,
   sliceMessagesPage,
 } from '#shared/chat-core'
+import { MAX_FILE_BYTES, formatFileSize, safeFileName, type FileMessageBody } from '#shared/file-core'
 
 interface Bubble {
   key: string
@@ -20,7 +22,12 @@ interface Bubble {
   deleted: boolean
   pending: boolean
   failed: string
+  file: FileMessageBody | null
+  /** Status unggah/unduh dokumen yang sedang berjalan. */
+  progress: string
 }
+
+type SendParams = Awaited<ReturnType<typeof encryptText>> & { p_attachment_id?: string }
 
 const REPORT_REASONS = [
   { value: 'spam', label: 'Spam' },
@@ -47,6 +54,7 @@ const showSafety = ref(false)
 const reportReason = ref('')
 const reportDone = ref(false)
 const scroller = ref<HTMLElement | null>(null)
+const fileInput = ref<HTMLInputElement | null>(null)
 
 const peerId = () => conversation.value?.peer_id ?? ''
 
@@ -60,6 +68,15 @@ const toBubble = async (m: ChatMessage): Promise<Bubble> => ({
   deleted: Boolean(m.deleted_at),
   pending: false,
   failed: '',
+  file: await decryptFile(m, peerId()),
+  progress: '',
+})
+
+const percent = (done: number, total: number) => `${Math.round((done / Math.max(total, 1)) * 100)}%`
+
+const localBubble = (text: string): Bubble => reactive<Bubble>({
+  key: `local-${randomId()}`, id: null, seq: 0, mine: true, text,
+  createdAt: new Date().toISOString(), deleted: false, pending: true, failed: '', file: null, progress: '',
 })
 
 const scrollToBottom = async () => {
@@ -188,7 +205,7 @@ const upsert = async (message: ChatMessage) => {
   const index = bubbles.value.findIndex((b) => b.key === bubble.key)
   if (index >= 0) bubbles.value[index] = bubble
   else bubbles.value.push(bubble)
-  bubbles.value.sort((a, b) => (a.pending ? Infinity : a.seq) - (b.pending ? Infinity : b.seq))
+  bubbles.value.sort(compareBubbles)
 }
 
 const stopInbox = onInbox(async (event, payload) => {
@@ -210,8 +227,8 @@ const stopInbox = onInbox(async (event, payload) => {
 })
 onBeforeUnmount(stopInbox)
 
-const sendText = async (text: string, bubble: Bubble, retry = false): Promise<void> => {
-  const params = await encryptText(conversationId, peerId(), text, retry)
+const deliver = async (build: (retry: boolean) => Promise<SendParams>, bubble: Bubble, retry = false): Promise<void> => {
+  const params = await build(retry)
   bubble.key = params.p_client_msg_id
   const result = await rpc<SendResult>('seru24_send_message', params)
   if (result.ok) {
@@ -226,7 +243,7 @@ const sendText = async (text: string, bubble: Bubble, retry = false): Promise<vo
       sender_id: myId || null,
       seq: bubble.seq,
       client_msg_id: params.p_client_msg_id,
-      kind: 'text',
+      kind: params.p_kind,
       ciphertext: params.p_ciphertext,
       nonce: params.p_nonce,
       sender_key_version: params.p_sender_key_version,
@@ -246,7 +263,7 @@ const sendText = async (text: string, bubble: Bubble, retry = false): Promise<vo
   }
   if (result.code === 'stale_key' && !retry) {
     keyStatus.value = await checkPeerKey(peerId())
-    return sendText(text, bubble, true)
+    return deliver(build, bubble, true)
   }
   bubble.pending = false
   bubble.failed = SEND_ERRORS[result.code ?? ''] ?? 'Pesan gagal dikirim'
@@ -257,14 +274,11 @@ const send = async () => {
   if (!text || !conversation.value) return
   draft.value = ''
   error.value = ''
-  const bubble = reactive<Bubble>({
-    key: `local-${Date.now()}`, id: null, seq: 0, mine: true, text,
-    createdAt: new Date().toISOString(), deleted: false, pending: true, failed: '',
-  })
+  const bubble = localBubble(text)
   bubbles.value.push(bubble)
   await scrollToBottom()
   try {
-    await sendText(text, bubble)
+    await deliver((retry) => encryptText(conversationId, peerId(), text, retry), bubble)
     if (isIncomingRequest(conversation.value)) conversation.value.status = 'accepted'
   } catch (e) {
     bubble.pending = false
@@ -272,11 +286,62 @@ const send = async () => {
   }
 }
 
+/** Dokumen dikirim satu per satu: enkripsi, unggah per potongan, lalu kirim pesan berisi kunci file (E2EE). */
+const sendFile = async (file: File) => {
+  const bubble = localBubble(`📎 ${safeFileName(file.name)}`)
+  bubbles.value.push(bubble)
+  await scrollToBottom()
+  if (file.size > MAX_FILE_BYTES) {
+    bubble.pending = false
+    bubble.failed = `Maksimal ${formatFileSize(MAX_FILE_BYTES)} per file`
+    return
+  }
+  let uploaded: FileMessageBody | null = null
+  try {
+    bubble.progress = 'Mengenkripsi…'
+    uploaded = await uploadFile(conversationId, file, (done, total) => { bubble.progress = `Mengunggah ${percent(done, total)}` })
+    bubble.file = uploaded
+    bubble.progress = ''
+    const meta = uploaded
+    await deliver((retry) => encryptFile(conversationId, peerId(), meta, retry), bubble)
+  } catch (e) {
+    bubble.pending = false
+    bubble.failed = e instanceof Error && e.message ? e.message : 'Dokumen gagal dikirim'
+  } finally {
+    bubble.progress = ''
+  }
+  // pesan gagal terkirim: jangan tinggalkan file yatim di Drive
+  if (bubble.failed && uploaded) deleteRemoteFile(uploaded.id).catch(() => undefined)
+}
+
+const onFilesPicked = async (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const files = [...(input.files ?? [])]
+  input.value = ''
+  error.value = ''
+  for (const file of files) await sendFile(file)
+}
+
+const download = async (bubble: Bubble) => {
+  if (!bubble.file || bubble.progress) return
+  bubble.failed = ''
+  try {
+    await downloadFile(bubble.file, (done, total) => { bubble.progress = `Mengunduh ${percent(done, total)}` })
+  } catch {
+    bubble.failed = 'Dokumen gagal diunduh'
+  } finally {
+    bubble.progress = ''
+  }
+}
+
 const removeMessage = async (bubble: Bubble) => {
   if (!bubble.id) return
+  // file di Google Drive dihapus permanen lebih dulu; pesan tetap dihapus walau file sudah tidak ada
+  if (bubble.file) await deleteRemoteFile(bubble.file.id).catch(() => undefined)
   if (await rpc<boolean>('seru24_delete_message', { p_message_id: bubble.id }).catch(() => false)) {
     bubble.deleted = true
     bubble.text = null
+    bubble.file = null
     // Samakan cache lokal dengan server agar ciphertext pesan yang dihapus tidak tertinggal di browser.
     const cached = allMessages.value.find((m) => m.client_msg_id === bubble.key)
     if (cached) await upsert(markMessageDeleted(cached))
@@ -385,7 +450,16 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
       <div v-for="b in bubbles" :key="b.key" class="bubble" :class="{ mine: b.mine, failed: b.failed }">
         <p v-if="b.deleted" class="muted"><em>Pesan dihapus</em></p>
         <p v-else-if="b.text === null" class="muted"><em>Pesan tidak dapat dibuka</em></p>
+        <div v-else-if="b.file" class="doc row">
+          <span class="doc-icon" aria-hidden="true">📎</span>
+          <span class="doc-info">
+            <strong class="doc-name">{{ b.file.name }}</strong>
+            <span class="muted">{{ formatFileSize(b.file.size) }}</span>
+          </span>
+          <button type="button" class="doc-get" :disabled="Boolean(b.progress) || b.pending" @click="download(b)">Unduh</button>
+        </div>
         <p v-else class="text">{{ b.text }}</p>
+        <p v-if="b.progress" class="muted progress">{{ b.progress }}</p>
         <div class="foot row">
           <span class="muted">{{ status(b) }}</span>
           <button
@@ -402,6 +476,15 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <form class="composer row" @submit.prevent="send">
+      <input ref="fileInput" type="file" multiple hidden @change="onFilesPicked">
+      <button
+        type="button"
+        class="attach"
+        aria-label="Kirim dokumen"
+        title="Kirim dokumen (maks 50 MB per file)"
+        :disabled="keyStatus.status === 'missing' || conversation.peer_blocked"
+        @click="fileInput?.click()"
+      >📎</button>
       <textarea
         v-model="draft"
         rows="1"
@@ -460,4 +543,11 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
 .icon-del { padding: 0 2px; border: 0; background: none; color: var(--muted); font-size: 15px; line-height: 1; cursor: pointer; }
 .icon-del:hover { color: var(--danger); }
 .composer textarea { flex: 1; resize: none; max-height: 140px; }
+.attach { padding: 6px 10px; font-size: 18px; line-height: 1; }
+.doc { gap: 10px; align-items: center; }
+.doc-icon { font-size: 22px; }
+.doc-info { display: flex; flex-direction: column; min-width: 0; }
+.doc-name { overflow-wrap: anywhere; }
+.doc-get { padding: 4px 10px; font-size: 13px; }
+.progress { font-size: 12px; }
 </style>

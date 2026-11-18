@@ -77,11 +77,17 @@ export const oldestPersistedSeq = (items: readonly PagedBubble[]): number | null
 }
 
 /** Gabungkan halaman pesan lama ke daftar yang sudah ada tanpa duplikat key, tetap urut naik. */
+/** Urutan tampil: pesan tersimpan menurut seq; yang belum tersimpan (mengirim/gagal, seq 0) selalu paling bawah. */
+export const compareBubbles = (a: PagedBubble, b: PagedBubble): number => {
+  const rank = (x: PagedBubble) => (x.pending || x.seq <= 0 ? Infinity : x.seq)
+  return rank(a) === rank(b) ? 0 : rank(a) - rank(b)
+}
+
 export const mergePagedBubbles = <T extends PagedBubble>(incoming: readonly T[], current: readonly T[]): T[] => {
   const byKey = new Map<string, T>()
   for (const item of incoming) byKey.set(item.key, item)
   for (const item of current) byKey.set(item.key, item)
-  return [...byKey.values()].sort((a, b) => (a.pending ? Infinity : a.seq) - (b.pending ? Infinity : b.seq))
+  return [...byKey.values()].sort(compareBubbles)
 }
 
 export interface CacheableMessage {

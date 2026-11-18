@@ -36,6 +36,10 @@
     smtpPass: '',
     smtpFrom: '',
     smtpTargetEmail: '',
+    // OAuth Google Drive akun penyimpanan dokumen chat (NUXT_GDRIVE_*); hanya server.
+    gdriveClientId: '',
+    gdriveClientSecret: '',
+    gdriveRefreshToken: '',
     public: {
       supabaseUrl: '',
       supabaseAnonKey: '',
@@ -50,6 +54,14 @@
     // Batas percobaan login/daftar per IP (OWASP ASVS V2.2.1). Penyimpanan di memori per instance.
     '/api/auth/**': { security: { rateLimiter: { tokensPerInterval: 10, interval: 60_000 } } },
     '/api/push/**': { security: { rateLimiter: { tokensPerInterval: 60, interval: 60_000 } } },
+    // Dokumen dikirim per potongan 3 MiB (FILE_CHUNK_BYTES): body boleh sedikit di atas batas bawaan 2 MB,
+    // dan satu file 50 MB = 17 permintaan sehingga batas laju lebih longgar dari bawaan (OWASP ASVS V12.1.1, V11.1.4).
+    '/api/files/**': {
+      security: {
+        requestSizeLimiter: { maxRequestSizeInBytes: 3_300_000, maxUploadFileRequestInBytes: 3_300_000 },
+        rateLimiter: { tokensPerInterval: 300, interval: 60_000 },
+      },
+    },
   },
 
   // Header keamanan (OWASP ASVS V14.4, V3.4)

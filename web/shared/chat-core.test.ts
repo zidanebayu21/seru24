@@ -59,6 +59,16 @@ describe('paginasi pesan', () => {
     ])
   })
 
+  it('pesan gagal terkirim (seq 0) tetap di bawah, tidak naik ke atas riwayat', () => {
+    const current = [
+      { key: 'gagal', seq: 0, pending: false },
+      { key: 'm2', seq: 2, pending: false },
+      { key: 'kirim', seq: 0, pending: true },
+    ]
+    expect(mergePagedBubbles([{ key: 'm1', seq: 1, pending: false }], current).map((x) => x.key))
+      .toEqual(['m1', 'm2', 'gagal', 'kirim'])
+  })
+
   it('menandai pesan terhapus dengan mengosongkan isi terenkripsi', () => {
     const msg = { client_msg_id: 'c1', seq: 1, ciphertext: 'abc', nonce: 'n', deleted_at: null }
     expect(markMessageDeleted(msg, '2026-11-18T00:00:00Z')).toEqual({

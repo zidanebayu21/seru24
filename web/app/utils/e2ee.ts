@@ -16,5 +16,7 @@ const core = createE2ee({
 export const resetE2ee = core.resetE2ee
 export const encryptText = core.encryptText
 export const decryptText = core.decryptText
+export const encryptFile = core.encryptFile
+export const decryptFile = core.decryptFile
 export const checkPeerKey = core.checkPeerKey
 export const acceptPeerKey = core.acceptPeerKey

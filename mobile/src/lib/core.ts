@@ -126,6 +126,12 @@ export const inbox = createInbox(getSupabase, () => account.me?.id);
 
 export const listConversations = () => rpc<Conversation[]>('seru24_list_conversations');
 
+/** Hapus dokumen milik sendiri di server dan Google Drive (dipanggil sebelum pesannya dihapus). */
+export const deleteRemoteFile = async (id: string) => {
+  const token = await session.getAccessToken();
+  if (token) await secureFetch('/api/files/delete', { access_token: token, id });
+};
+
 /** Saat aplikasi dibuka: pulihkan sesi (cookie refresh) dan kunci chat dari Keystore. */
 export const restoreSession = async (): Promise<AccountStatus> => {
   await Promise.all([loadVisitorKey(), installNativeScrypt()]);

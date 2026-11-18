@@ -13,6 +13,7 @@ import {
   type SecretKeyring,
 } from './crypto'
 import type { Me, Rpc } from './account-core'
+import { parseFileBody, type FileMessageBody } from './file-core'
 
 export interface ChatMessage {
   id: string
@@ -92,21 +93,19 @@ export const createE2ee = (deps: E2eeDeps) => {
     return key
   }
 
-  /** Parameter siap kirim ke RPC seru24_send_message. */
-  const encryptText = async (conversationId: string, peerId: string, text: string, refreshPeer = false) => {
+  const seal = async (conversationId: string, peerId: string, kind: MessageKind, body: unknown, refreshPeer: boolean) => {
     const me = deps.getMe()
     if (!me?.key_version) throw new Error('Kunci belum siap')
-    if (text.length > MAX_TEXT_LENGTH) throw new Error(`Maksimal ${MAX_TEXT_LENGTH} karakter`)
     const peer = latestKey(await fetchPublicKeys(peerId, refreshPeer))
     if (!peer) throw new Error('Lawan bicara belum menyiapkan kunci enkripsi')
 
     const clientMsgId = randomId()
     const key = await conversationKey(conversationId, peerId, me.key_version, peer.key_version)
-    const sealed = encryptMessage(key, { t: text }, { conversationId, senderId: me.id, clientMsgId, kind: 'text' })
+    const sealed = encryptMessage(key, body, { conversationId, senderId: me.id, clientMsgId, kind })
     return {
       p_conversation_id: conversationId,
       p_client_msg_id: clientMsgId,
-      p_kind: 'text',
+      p_kind: kind,
       p_ciphertext: sealed.ciphertext,
       p_nonce: sealed.nonce,
       p_sender_key_version: me.key_version,
@@ -114,8 +113,20 @@ export const createE2ee = (deps: E2eeDeps) => {
     }
   }
 
-  /** null = dihapus, kedaluwarsa, atau gagal dibuka (kunci salah / data diubah). */
-  const decryptText = async (message: ChatMessage, peerId: string): Promise<string | null> => {
+  /** Parameter siap kirim ke RPC seru24_send_message. */
+  const encryptText = async (conversationId: string, peerId: string, text: string, refreshPeer = false) => {
+    if (text.length > MAX_TEXT_LENGTH) throw new Error(`Maksimal ${MAX_TEXT_LENGTH} karakter`)
+    return seal(conversationId, peerId, 'text', { t: text }, refreshPeer)
+  }
+
+  /** Pesan dokumen: metadata dan kunci file ikut terenkripsi E2EE; server hanya melihat attachment_id. */
+  const encryptFile = async (conversationId: string, peerId: string, file: FileMessageBody, refreshPeer = false) => ({
+    ...(await seal(conversationId, peerId, 'file', { f: file }, refreshPeer)),
+    p_attachment_id: file.id,
+  })
+
+  /** Isi pesan yang sudah dibuka; null = dihapus, kedaluwarsa, atau gagal dibuka (kunci salah / data diubah). */
+  const openBody = async (message: ChatMessage, peerId: string): Promise<{ t?: unknown; f?: unknown } | null> => {
     const me = deps.getMe()
     if (message.deleted_at || !message.ciphertext || !message.nonce || !me) return null
     const mine = message.sender_id === me.id
@@ -123,16 +134,26 @@ export const createE2ee = (deps: E2eeDeps) => {
     const peerVersion = mine ? message.recipient_key_version : message.sender_key_version
     try {
       const key = await conversationKey(message.conversation_id, peerId, myVersion, peerVersion)
-      const body = decryptMessage<{ t?: unknown }>(
+      return decryptMessage<{ t?: unknown; f?: unknown }>(
         key,
         { ciphertext: message.ciphertext, nonce: message.nonce },
         { conversationId: message.conversation_id, senderId: message.sender_id ?? '', clientMsgId: message.client_msg_id, kind: message.kind },
       )
-      return typeof body.t === 'string' ? body.t.slice(0, MAX_TEXT_LENGTH) : null
     } catch {
       return null
     }
   }
+
+  /** Teks pesan; pesan dokumen tampil sebagai "📎 nama" untuk klien yang belum bisa membuka dokumen. */
+  const decryptText = async (message: ChatMessage, peerId: string): Promise<string | null> => {
+    const body = await openBody(message, peerId)
+    if (typeof body?.t === 'string') return body.t.slice(0, MAX_TEXT_LENGTH)
+    const file = parseFileBody(body?.f)
+    return file ? `📎 ${file.name}` : null
+  }
+
+  const decryptFile = async (message: ChatMessage, peerId: string): Promise<FileMessageBody | null> =>
+    message.kind === 'file' ? parseFileBody((await openBody(message, peerId))?.f) : null
 
   const tofuKey = (peerId: string) => `seru24:tofu:${deps.getMe()?.id}:${peerId}`
 
@@ -156,5 +177,5 @@ export const createE2ee = (deps: E2eeDeps) => {
     if (peer) await deps.tofu.set(tofuKey(peerId), peer.public_key)
   }
 
-  return { resetE2ee, encryptText, decryptText, checkPeerKey, acceptPeerKey }
+  return { resetE2ee, encryptText, encryptFile, decryptText, decryptFile, checkPeerKey, acceptPeerKey }
 }

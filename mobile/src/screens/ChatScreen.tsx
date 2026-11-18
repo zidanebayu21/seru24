@@ -22,7 +22,7 @@ import {
   loadLocalConversationState,
   saveLocalMessages,
 } from '../lib/chatStorage';
-import { account, e2ee, inbox, rpc } from '../lib/core';
+import { account, deleteRemoteFile, e2ee, inbox, rpc } from '../lib/core';
 import { notifyMessageSent } from '../lib/notify';
 import { Button } from '../components/Button';
 import { MenuItem, PopupMenu } from '../components/PopupMenu';
@@ -311,10 +311,13 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
 
   const removeMessage = async (item: Bubble) => {
     if (!item.id) return;
+    const cached = allMessagesRef.current.find(m => m.client_msg_id === item.key);
+    // pesan dokumen: file di Google Drive dihapus permanen lebih dulu
+    const file = cached ? await e2ee.decryptFile(cached, peerId) : null;
+    if (file) await deleteRemoteFile(file.id).catch(() => undefined);
     if (!(await rpc<boolean>('seru24_delete_message', { p_message_id: item.id }).catch(() => false))) return;
     updateBubble(item.key, { deleted: true, text: null });
     // Samakan cache lokal dengan server agar ciphertext pesan yang dihapus tidak tertinggal di HP.
-    const cached = allMessagesRef.current.find(m => m.client_msg_id === item.key);
     const myId = account.me?.id ?? '';
     if (!cached) return;
     const deleted = markMessageDeleted(cached);
