@@ -1,4 +1,11 @@
 :root {
+  --radius: 12px;
+}
+
+/* Tema dipasang lewat atribut data-theme di <html> (plugins/theme.client.ts); nilainya harus sama dengan
+   shared/theme-core.ts. Tanpa atribut (sebelum JS jalan) dipakai tema terang. */
+:root,
+:root[data-theme="light"] {
   --bg: #f4f5f7;
   --surface: #ffffff;
   --text: #1c1f24;
@@ -10,25 +17,40 @@
   --theirs: #ffffff;
   --danger: #b42318;
   --warn-bg: #fff4d6;
-  --radius: 12px;
+  --quote-bg: rgb(15 118 110 / 10%);
   color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1215;
-    --surface: #181c21;
-    --text: #e7e9ec;
-    --muted: #9aa1aa;
-    --border: #2a3038;
-    --accent: #2dd4bf;
-    --accent-text: #062a26;
-    --mine: #123a35;
-    --theirs: #1f242b;
-    --danger: #f97066;
-    --warn-bg: #3a2f12;
-    color-scheme: dark;
-  }
+:root[data-theme="dark"] {
+  --bg: #0f1215;
+  --surface: #181c21;
+  --text: #e7e9ec;
+  --muted: #9aa1aa;
+  --border: #2a3038;
+  --accent: #2dd4bf;
+  --accent-text: #062a26;
+  --mine: #123a35;
+  --theirs: #1f242b;
+  --danger: #f97066;
+  --warn-bg: #3a2f12;
+  --quote-bg: rgb(45 212 191 / 12%);
+  color-scheme: dark;
+}
+
+:root[data-theme="teal"] {
+  --bg: #1d1612;
+  --surface: #2a201a;
+  --text: #f2e8dd;
+  --muted: #b5a392;
+  --border: #44342b;
+  --accent: #2ec4b0;
+  --accent-text: #06231f;
+  --mine: #1d4a44;
+  --theirs: #35281f;
+  --danger: #ff8a7a;
+  --warn-bg: #4a3a1c;
+  --quote-bg: rgb(46 196 176 / 14%);
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }

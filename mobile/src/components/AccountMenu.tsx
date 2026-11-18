@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Linking, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { Linking, Pressable, Switch, Text, View } from 'react-native';
 import {
   clearAllLocalChats,
   getLocalChatStorageStats,
@@ -9,7 +9,8 @@ import {
 import { APP_VERSION_NAME } from '../env';
 import { account, signOut, webUrl } from '../lib/core';
 import { disableNotifications, enableNotifications, isNotifyEnabled, notifySupported } from '../lib/notify';
-import { colors, ui } from '../theme';
+import { THEME_OPTIONS } from '../../../web/shared/theme-core';
+import { colors, setTheme, themePref, themed, ui } from '../theme';
 import { MenuItem, menuStyles, PopupMenu } from './PopupMenu';
 
 interface Props {
@@ -133,6 +134,23 @@ export const AccountMenu = ({ onSignedOut }: Props) => {
           </View>
         ) : null}
         {notifyHint ? <Text style={[ui.error, { fontSize: 12, paddingHorizontal: 10 }]}>{notifyHint}</Text> : null}
+        <View style={styles.themeBox}>
+          <Text style={[ui.muted, { fontSize: 12 }]}>Tema</Text>
+          <View style={styles.themeOptions}>
+            {THEME_OPTIONS.map(option => (
+              <Pressable
+                key={option.value}
+                accessibilityRole="button"
+                accessibilityState={{ selected: themePref() === option.value }}
+                onPress={() => setTheme(option.value)}
+                style={[styles.themeChip, themePref() === option.value && styles.themeChipActive]}>
+                <Text style={{ fontSize: 12, color: themePref() === option.value ? colors.accentText : colors.text }}>
+                  {option.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
         <View style={styles.storageBox}>
           <Text style={[ui.muted, { fontSize: 12 }]}>
             DB Lokal: {stats.conversations} chat · {stats.messages} pesan ({formatBytes(stats.sizeBytes)})
@@ -151,10 +169,14 @@ export const AccountMenu = ({ onSignedOut }: Props) => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themed(() => ({
   avatar: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   initials: { color: '#fff', fontWeight: '700' },
   who: { padding: 10, borderBottomWidth: 1, borderBottomColor: colors.border, marginBottom: 4 },
   storageBox: { paddingHorizontal: 10, paddingVertical: 6, borderTopWidth: 1, borderTopColor: colors.border, marginTop: 4 },
+  themeBox: { paddingHorizontal: 10, paddingVertical: 6 },
+  themeOptions: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 },
+  themeChip: { borderWidth: 1, borderColor: colors.border, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
+  themeChipActive: { backgroundColor: colors.accent, borderColor: colors.accent },
   toggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 },
-});
+}));

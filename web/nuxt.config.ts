@@ -14,6 +14,10 @@
       ],
       // ikon seru24 (konsep B2: gelembung chat + "24"), sama dengan ikon aplikasi Android
       link: [{ rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],
+      // pasang tema sebelum halaman tampil agar tidak berkedip (logika sama dengan composables/useTheme.ts)
+      script: [{
+        innerHTML: "try{var p=localStorage.getItem('seru24:theme');var d=matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.dataset.theme=p==='light'||p==='dark'||p==='teal'?p:d?'dark':'light'}catch(e){}",
+      }],
     },
   },
 

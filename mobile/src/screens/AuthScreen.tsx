@@ -4,7 +4,7 @@ import { errorMessage } from '../../../web/shared/secure-fetch-core';
 import { finishSignIn, session, signOut, webUrl } from '../lib/core';
 import { Button } from '../components/Button';
 import { PASSWORD_MIN_LENGTH as PASSWORD_MIN } from '../env';
-import { ui } from '../theme';
+import { colors, ui } from '../theme';
 
 const USERNAME_PATTERN = /^[a-z0-9_]{3,30}$/;
 
@@ -143,6 +143,7 @@ const Field = ({ label, value, onChange, secure, placeholder, autoComplete, auto
       onChangeText={onChange}
       secureTextEntry={secure}
       placeholder={placeholder}
+      placeholderTextColor={colors.muted}
       autoComplete={autoComplete}
       autoCapitalize={autoCapitalize}
       autoCorrect={false}

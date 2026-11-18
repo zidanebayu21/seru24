@@ -1,6 +1,6 @@
 import React from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors } from '../theme';
+import { Modal, Pressable, Text, View } from 'react-native';
+import { colors, themed } from '../theme';
 
 interface PopupMenuProps {
   open: boolean;
@@ -23,11 +23,11 @@ export const MenuItem = ({ label, onPress, danger }: { label: string; onPress: (
   </Pressable>
 );
 
-export const menuStyles = StyleSheet.create({
+export const menuStyles = themed(() => ({
   item: { paddingVertical: 11, paddingHorizontal: 10, borderRadius: 8 },
-});
+}));
 
-const styles = StyleSheet.create({
+const styles = themed(() => ({
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.15)', alignItems: 'flex-end', paddingTop: 64, paddingRight: 16 },
   menu: { minWidth: 220, backgroundColor: colors.surface, borderRadius: 12, padding: 6, elevation: 6 },
-});
+}));

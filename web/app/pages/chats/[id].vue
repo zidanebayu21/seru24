@@ -608,14 +608,14 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
 .icon-del { padding: 0 2px; border: 0; background: none; color: var(--muted); font-size: 15px; line-height: 1; cursor: pointer; }
 .icon-del:hover { color: var(--danger); }
 .icon-reply { padding: 0 2px; border: 0; background: none; color: var(--muted); font-size: 14px; line-height: 1; cursor: pointer; }
-.icon-reply:hover { color: var(--accent, #0f766e); }
+.icon-reply:hover { color: var(--accent); }
 .ticks { font-size: 12px; letter-spacing: -3px; color: var(--muted); margin-right: 2px; }
-.ticks.read { color: #0d9488; font-weight: 700; }
-.quote { display: flex; flex-direction: column; gap: 1px; padding: 4px 8px; margin-bottom: 4px; border-left: 3px solid #14b8a6; border-radius: 6px; background: rgba(15, 118, 110, 0.08); font-size: 12px; overflow-wrap: anywhere; }
-.quote strong { color: #0f766e; }
+.ticks.read { color: var(--accent); font-weight: 700; }
+.quote { display: flex; flex-direction: column; gap: 1px; padding: 4px 8px; margin-bottom: 4px; border-left: 3px solid var(--accent); border-radius: 6px; background: var(--quote-bg); font-size: 12px; overflow-wrap: anywhere; }
+.quote strong { color: var(--accent); }
 .replying { gap: 8px; align-items: center; }
 .replying .grow { flex: 1; min-width: 0; margin-bottom: 0; }
-.typing { color: #0f766e; font-style: italic; }
+.typing { color: var(--accent); font-style: italic; }
 .composer textarea { flex: 1; resize: none; max-height: 140px; }
 .attach { padding: 6px 10px; font-size: 18px; line-height: 1; }
 .doc { gap: 10px; align-items: center; }

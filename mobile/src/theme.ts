@@ -1,19 +1,69 @@
-import { StyleSheet } from 'react-native';
+import { Appearance, StyleSheet, type ImageStyle, type TextStyle, type ViewStyle } from 'react-native';
+import { PALETTES, isDarkTheme, isThemePref, resolveTheme, type Palette, type ThemeName, type ThemePref } from '../../web/shared/theme-core';
+import { readSetting, writeSetting } from './lib/core';
 
-export const colors = {
-  bg: '#f4f5f7',
-  surface: '#ffffff',
-  text: '#1c1f24',
-  muted: '#646b75',
-  border: '#dde1e6',
-  accent: '#0f766e',
-  accentText: '#ffffff',
-  mine: '#d9f2ee',
-  danger: '#b42318',
-  warnBg: '#fff4d6',
+// `colors` diubah di tempat saat tema berganti; gaya dibuat ulang lewat `themed` dan App memasang ulang layar
+// (key = themeVersion), jadi komponen cukup membaca `colors.x` saat render.
+export const colors: Palette = { ...PALETTES.light };
+
+const SETTING = 'theme';
+let pref: ThemePref = 'system';
+let current: ThemeName = 'light';
+let version = 0;
+const listeners = new Set<() => void>();
+
+const apply = () => {
+  const next = resolveTheme(pref, Appearance.getColorScheme() === 'dark');
+  if (next === current && version > 0) return;
+  current = next;
+  Object.assign(colors, PALETTES[next]);
+  version += 1;
+  for (const listener of listeners) listener();
 };
 
-export const ui = StyleSheet.create({
+export const themeVersion = () => version;
+export const themePref = () => pref;
+export const isDarkMode = () => isDarkTheme(current);
+export const onThemeChange = (listener: () => void) => {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+};
+
+export const loadTheme = async () => {
+  const stored = await readSetting(SETTING);
+  pref = isThemePref(stored) ? stored : 'system';
+  apply();
+  Appearance.addChangeListener(apply);
+};
+
+export const setTheme = async (value: ThemePref) => {
+  pref = value;
+  apply();
+  await writeSetting(SETTING, value);
+};
+
+type NamedStyles<T> = { [P in keyof T]: ViewStyle | TextStyle | ImageStyle };
+
+/** Gaya yang ikut tema: dibuat ulang bila tema berubah sejak terakhir dibaca. */
+export const themed = <T extends NamedStyles<T> | NamedStyles<any>>(
+  factory: () => T | NamedStyles<T>,
+): T => {
+  let built = -1;
+  let cache: T;
+  return new Proxy({} as T, {
+    get: (_, key) => {
+      if (built !== version) {
+        cache = StyleSheet.create(factory()) as T;
+        built = version;
+      }
+      return cache[key as keyof T];
+    },
+  });
+};
+
+export const ui = themed(() => ({
   screen: { flex: 1, backgroundColor: colors.bg },
   card: {
     backgroundColor: colors.surface,
@@ -45,4 +95,4 @@ export const ui = StyleSheet.create({
   notice: { backgroundColor: colors.warnBg, borderRadius: 8, padding: 10, color: colors.text, fontSize: 13 },
   link: { color: colors.accent, fontWeight: '600' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-});
+}));

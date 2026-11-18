@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, Text, TextInput, View } from 'react-native';
 import { formatTime, isIncomingRequest, peerLabel, type Conversation, type FoundUser } from '../../../web/shared/chat-core';
 import { loadLocalConversations, saveLocalConversations } from '../lib/chatStorage';
 import { account, inbox, listConversations, rpc } from '../lib/core';
 import { AccountMenu } from '../components/AccountMenu';
 import { Button } from '../components/Button';
 import { UpdateBanner } from '../components/UpdateBanner';
-import { colors, ui } from '../theme';
+import { colors, themed, ui } from '../theme';
 
 interface Props {
   onOpen: (conversation: Conversation) => void;
@@ -123,6 +123,7 @@ export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
           value={query}
           onChangeText={setQuery}
           placeholder="Cari username persis, mis. zidane_21"
+          placeholderTextColor={colors.muted}
           autoCapitalize="none"
           autoCorrect={false}
           returnKeyType="search"
@@ -173,7 +174,7 @@ export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themed(() => ({
   item: { flexDirection: 'row', alignItems: 'center', padding: 12, gap: 8 },
   badge: {
     minWidth: 22,
@@ -185,4 +186,4 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: 'center',
   },
-});
+}));

@@ -1,4 +1,3 @@
-import { isNetworkError } from '../../../web/shared/session-core';
 import type { SendResult } from '../../../web/shared/chat-core';
 import { account, readSetting, rpc, writeSetting } from './core';
 
@@ -24,6 +23,8 @@ type SentListener = (item: QueuedMessage, result: SendResult) => void;
 
 const listeners = new Set<SentListener>();
 let flushing: Promise<void> | null = null;
+let retryTimer: ReturnType<typeof setTimeout> | undefined;
+const RETRY_MS = 15_000;
 
 const storageKey = () => `outbox.${account.me?.id ?? ''}`;
 
@@ -41,6 +42,7 @@ const save = (items: QueuedMessage[]) => writeSetting(storageKey(), JSON.stringi
 export const queueMessage = async (item: QueuedMessage) => {
   const items = await load();
   if (!items.some(x => x.params.p_client_msg_id === item.params.p_client_msg_id)) await save([...items, item]);
+  scheduleRetry();
 };
 
 export const queuedFor = async (conversationId: string) =>
@@ -54,6 +56,14 @@ export const onQueuedSent = (listener: SentListener) => {
   };
 };
 
+/** Coba kirim lagi beberapa detik kemudian selama masih ada antrean (sinyal bisa kembali kapan saja). */
+const scheduleRetry = () => {
+  clearTimeout(retryTimer);
+  retryTimer = setTimeout(() => {
+    flushOutbox().catch(() => undefined);
+  }, RETRY_MS);
+};
+
 /** Kirim semua antrean berurutan; berhenti di gangguan jaringan pertama (dicoba lagi nanti). */
 export const flushOutbox = (): Promise<void> => {
   flushing ??= (async () => {
@@ -63,9 +73,11 @@ export const flushOutbox = (): Promise<void> => {
       let result: SendResult;
       try {
         result = await rpc<SendResult>('seru24_send_message', item!.params);
-      } catch (error) {
-        if (isNetworkError(error)) return;
-        result = { ok: false, code: 'unknown' } as SendResult;
+      } catch {
+        // gangguan jaringan, atau sesi belum pulih setelah lama offline: pesan tetap di antrean dan dicoba lagi.
+        // Hanya penolakan eksplisit server (result.ok = false) yang membuang pesan.
+        scheduleRetry();
+        return;
       }
       items = items.slice(1);
       await save(items);

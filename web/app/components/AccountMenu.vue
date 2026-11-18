@@ -44,6 +44,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKey)
 })
 
+const theme = useTheme()
 const notifyHint = ref('')
 
 const toggleNotifications = async () => {
@@ -96,6 +97,19 @@ const logout = async () => {
         <span class="switch" :class="{ on: notifyState.enabled }" aria-hidden="true" />
       </button>
       <p v-if="notifyHint" class="hint">{{ notifyHint }}</p>
+      <div class="themes" role="group" aria-label="Tema tampilan">
+        <span class="muted">Tema</span>
+        <div class="theme-options">
+          <button
+            v-for="option in theme.options"
+            :key="option.value"
+            type="button"
+            :class="{ active: theme.pref.value === option.value }"
+            :aria-pressed="theme.pref.value === option.value"
+            @click="theme.setTheme(option.value)"
+          >{{ option.label }}</button>
+        </div>
+      </div>
       <a
         v-if="androidRelease"
         :href="androidRelease.url"
@@ -169,10 +183,20 @@ const logout = async () => {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--surface);
   transition: transform .15s;
 }
 .switch.on { background: var(--accent); }
 .switch.on::after { transform: translateX(14px); }
+.themes { padding: 6px 10px 8px; }
+.theme-options { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.menu .theme-options button {
+  width: auto;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+}
+.menu .theme-options button.active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 .hint { margin: 0; padding: 4px 10px 8px; font-size: 12px; color: var(--danger); }
 </style>

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, BackHandler, FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, BackHandler, FlatList, KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from 'react-native';
 import { MAX_TEXT_LENGTH, randomId } from '../../../web/shared/crypto';
 import { formatFileSize, safeFileName, type FileMessageBody } from '../../../web/shared/file-core';
 import {
@@ -32,7 +32,7 @@ import { downloadFile, findSavedFile, openSavedFile, pickFiles, uploadFile, type
 import { notifyMessageSent } from '../lib/notify';
 import { Button } from '../components/Button';
 import { MenuItem, PopupMenu } from '../components/PopupMenu';
-import { colors, ui } from '../theme';
+import { colors, themed, ui } from '../theme';
 
 interface Bubble {
   key: string;
@@ -176,7 +176,6 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
 
         // offline: kunci publik lawan dari cache HP
         setKeyStatus(await e2ee.checkPeerKey(peerId).catch(() => ({ status: 'missing' as const })));
-        await showQueued();
 
         if (allMessagesRef.current.length > 0) {
           const initialSlice = sliceMessagesPage(allMessagesRef.current, null, CHAT_PAGE_SIZE);
@@ -185,6 +184,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
           hasOlderRef.current = initialSlice.hasOlder;
           updateBubbles(() => cachedList);
         }
+        await showQueued();
 
         try {
           const rows = await rpc<ChatMessage[]>('seru24_get_messages', {
@@ -214,6 +214,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
             setError('Gagal memuat percakapan');
           }
         }
+        await showQueued();
       } catch {
         if (alive) setError('Gagal memuat percakapan');
       }
@@ -253,8 +254,11 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     };
   }, [conversation.id, peerId, toBubble, markRead, updateBubbles]);
 
-  useEffect(() => onQueuedSent((item, result) => {
+  useEffect(() => onQueuedSent(async (item, result) => {
     if (item.conversationId !== conversation.id) return;
+    // gelembung bisa belum ada bila chat dibuka ulang setelah pesan diantrekan
+    const bubble = { ...(await toBubble(queuedAsMessage(item, account.me?.id ?? null))), pending: true };
+    updateBubbles(list => (list.some(b => b.key === bubble.key) ? list : [...list, bubble]));
     if (result.ok) markDelivered(item.params, result, false);
     else updateBubble(item.params.p_client_msg_id, { pending: false, progress: '', failed: SEND_ERRORS[result.code ?? ''] ?? 'Pesan gagal dikirim' });
   }));
@@ -683,6 +687,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
           value={draft}
           onChangeText={onDraftChange}
           placeholder="Tulis pesan"
+          placeholderTextColor={colors.muted}
           multiline
           editable={!cannotSend}
           maxLength={MAX_TEXT_LENGTH}
@@ -693,7 +698,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themed(() => ({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -709,11 +714,11 @@ const styles = StyleSheet.create({
   olderLoader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 8 },
   mine: { alignSelf: 'flex-end', backgroundColor: colors.mine },
   theirs: { alignSelf: 'flex-start', backgroundColor: colors.surface },
-  quote: { borderLeftWidth: 3, borderLeftColor: '#14b8a6', backgroundColor: 'rgba(15,118,110,0.08)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, marginBottom: 4 },
+  quote: { borderLeftWidth: 3, borderLeftColor: colors.accent, backgroundColor: `${colors.accent}22`, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, marginBottom: 4 },
   quoteWho: { color: colors.accent, fontWeight: '700', fontSize: 12 },
   replying: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingTop: 6 },
   ticks: { fontSize: 11, color: colors.muted, letterSpacing: -2 },
-  ticksRead: { color: '#0d9488', fontWeight: '700' },
+  ticksRead: { color: colors.accent, fontWeight: '700' },
   docButton: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: colors.border },
   composer: {
     flexDirection: 'row',
@@ -724,4 +729,4 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
     backgroundColor: colors.surface,
   },
-});
+}));

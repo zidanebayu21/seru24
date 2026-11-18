@@ -8,7 +8,7 @@ import { loadNotifySetting, startNotifications, stopNotifications, updateNotific
 import { AuthScreen } from './screens/AuthScreen';
 import { ChatListScreen } from './screens/ChatListScreen';
 import { ChatScreen } from './screens/ChatScreen';
-import { colors, ui } from './theme';
+import { colors, isDarkMode, loadTheme, onThemeChange, themeVersion, ui } from './theme';
 
 // boot = membaca profil tersimpan (sekejap, layar kosong); loading = belum pernah masuk di perangkat ini
 type Screen = { name: 'boot' } | { name: 'loading' } | { name: 'auth' } | { name: 'list' } | { name: 'chat'; conversation: Conversation };
@@ -18,6 +18,7 @@ const RETRY_MS = 15_000;
 const App = () => {
   const [screen, setScreen] = useState<Screen>({ name: 'boot' });
   const activeConversation = useRef<string | null>(null);
+  const [themeTick, setThemeTick] = useState(0);
   const signedIn = screen.name === 'list' || screen.name === 'chat';
 
   // Daftar chat dari cache lokal tampil seketika; sesi dan kunci dipulihkan di belakang.
@@ -40,7 +41,9 @@ const App = () => {
       if (status === 'ready') flushOutbox().catch(() => undefined);
     };
 
-    loadCachedAccount()
+    loadTheme()
+      .catch(() => undefined)
+      .then(() => loadCachedAccount())
       .then(cached => {
         setScreen(cached ? { name: 'list' } : { name: 'loading' });
         return restoreSession();
@@ -58,6 +61,8 @@ const App = () => {
       sub.remove();
     };
   }, []);
+
+  useEffect(() => onThemeChange(() => setThemeTick(themeVersion())), []);
 
   useEffect(() => {
     activeConversation.current = screen.name === 'chat' ? screen.conversation.id : null;
@@ -103,8 +108,9 @@ const App = () => {
 
   return (
     <SafeAreaProvider>
-      <StatusBar barStyle="dark-content" backgroundColor={colors.bg} />
-      <SafeAreaView style={ui.screen}>{content()}</SafeAreaView>
+      <StatusBar barStyle={isDarkMode() ? 'light-content' : 'dark-content'} backgroundColor={colors.bg} />
+      {/* key: layar dipasang ulang saat tema berganti agar gaya memakai warna baru */}
+      <SafeAreaView key={themeTick} style={ui.screen}>{content()}</SafeAreaView>
     </SafeAreaProvider>
   );
 };
