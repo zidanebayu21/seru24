@@ -9,7 +9,9 @@ let cached: { at: number; latest: AppRelease | null } | null = null
 
 export default defineLoggedHandler(async (event) => {
   if (!cached || Date.now() - cached.at > CACHE_MS) {
-    cached = { at: Date.now(), latest: await findApkRelease(driveConfig(event)) }
+    // tanpa Google Drive (NUXT_GDRIVE_*) belum ada rilis APK: jawab kosong, bukan error
+    const drive = useRuntimeConfig(event).gdriveRefreshToken ? driveConfig(event) : null
+    cached = { at: Date.now(), latest: drive ? await findApkRelease(drive) : null }
   }
   setResponseHeader(event, 'cache-control', 'public, max-age=60, s-maxage=300')
   return { latest: cached.latest }

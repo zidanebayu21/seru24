@@ -15,6 +15,11 @@ export default defineLoggedHandler(async (event) => {
     throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
   }
 
+  // NUXT_SMTP_ENABLED=false: deploy yang belum menyiapkan SMTP mematikan seluruh cron (rekap, retensi, perawatan dokumen, email)
+  if (String(config.smtpEnabled).toLowerCase() === 'false') {
+    return { ok: true, skipped: true, reason: 'Cron dimatikan (NUXT_SMTP_ENABLED=false)' }
+  }
+
   const query = getQuery(event)
   const dayParam = typeof query.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(query.day) ? query.day : null
   const dryRun = query.dryRun === '1' || query.dryRun === 'true'

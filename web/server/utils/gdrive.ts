@@ -31,7 +31,8 @@ export const driveConfig = (event: H3Event): DriveConfig => {
     refreshToken: String(config.gdriveRefreshToken ?? ''),
   }
   if (!drive.clientId || !drive.clientSecret || !drive.refreshToken) {
-    throw new Error('Konfigurasi belum lengkap: NUXT_GDRIVE_CLIENT_ID/SECRET/REFRESH_TOKEN kosong')
+    // fitur opsional: deploy tanpa Google Drive mendapat pesan jelas, bukan error server
+    throw createError({ statusCode: 503, statusMessage: 'Fitur dokumen belum dikonfigurasi di server (NUXT_GDRIVE_*)' })
   }
   return drive
 }

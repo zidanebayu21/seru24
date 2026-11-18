@@ -16,9 +16,10 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           BASE_URL="${SERU24_URL:-https://seru24.vercel.app}"
+          # fork/deploy lain yang belum menyiapkan cron: lewati tanpa gagal (isi secret CRON_SECRET untuk mengaktifkan)
           if [ -z "$CRON_SECRET" ]; then
-            echo "::error::Secret CRON_SECRET belum diset di repo"
-            exit 1
+            echo "::notice::Secret CRON_SECRET belum diset; cron statistik dilewati"
+            exit 0
           fi
           # Repo publik: log Actions bisa dibaca siapa saja, jadi isi laporan tidak dicetak, hanya status HTTP.
           code=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$BASE_URL/api/cron/daily-stats")

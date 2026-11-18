@@ -31,6 +31,8 @@
     fcmPrivateKey: '',
     // Cron non-Vercel & SMTP untuk laporan statistik harian; isi via CRON_SECRET / NUXT_SMTP_* / SMTP_*.
     cronSecret: '',
+    // false = cron /api/cron/daily-stats tidak menjalankan apa pun (untuk deploy yang belum menyiapkan SMTP)
+    smtpEnabled: true,
     smtpHost: '',
     smtpPort: '587',
     smtpSecure: '',
