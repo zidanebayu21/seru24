@@ -9,11 +9,12 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
-/** Modul native seru24 (scrypt, notifikasi, penyimpanan chat lokal, pembaruan aplikasi); didaftarkan manual di MainApplication. */
+/** Modul native seru24 (scrypt, notifikasi, penyimpanan chat lokal, pembaruan aplikasi, dokumen); didaftarkan manual di MainApplication. */
 public class Seru24Package implements ReactPackage {
     @Override
     public List<NativeModule> createNativeModules(ReactApplicationContext context) {
-        return Arrays.asList(new ScryptModule(context), new NotifyModule(context), new ChatStoreModule(context), new UpdateModule(context));
+        return Arrays.asList(new ScryptModule(context), new NotifyModule(context), new ChatStoreModule(context), new UpdateModule(context),
+            new FileModule(context));
     }
 
     @Override

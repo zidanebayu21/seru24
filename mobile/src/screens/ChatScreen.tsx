@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, BackHandler, FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { MAX_TEXT_LENGTH } from '../../../web/shared/crypto';
+import { MAX_TEXT_LENGTH, randomId } from '../../../web/shared/crypto';
+import { formatFileSize, safeFileName, type FileMessageBody } from '../../../web/shared/file-core';
 import {
   CHAT_MOBILE_PREFETCH_SCREENS,
   CHAT_PAGE_SIZE,
@@ -23,6 +24,7 @@ import {
   saveLocalMessages,
 } from '../lib/chatStorage';
 import { account, deleteRemoteFile, e2ee, inbox, rpc, whenAccountReady } from '../lib/core';
+import { downloadFile, pickFiles, uploadFile, type PickedFile } from '../lib/files';
 import { notifyMessageSent } from '../lib/notify';
 import { Button } from '../components/Button';
 import { MenuItem, PopupMenu } from '../components/PopupMenu';
@@ -38,7 +40,14 @@ interface Bubble {
   deleted: boolean;
   pending: boolean;
   failed: string;
+  file: FileMessageBody | null;
+  /** Status unggah/unduh dokumen yang sedang berjalan. */
+  progress: string;
 }
+
+type SendParams = Awaited<ReturnType<typeof e2ee.encryptText>> & { p_attachment_id?: string };
+
+const percent = (done: number, total: number) => `${Math.round((done / Math.max(total, 1)) * 100)}%`;
 
 interface Props {
   conversation: Conversation;
@@ -84,6 +93,8 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     deleted: Boolean(m.deleted_at),
     pending: false,
     failed: '',
+    file: await e2ee.decryptFile(m, peerId),
+    progress: '',
   }), [peerId]);
 
   const markRead = useCallback((seq: number) => {
@@ -237,8 +248,8 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
   const updateBubble = (key: string, patch: Partial<Bubble>) =>
     updateBubbles(list => mergePagedBubbles([], list.map(b => (b.key === key ? { ...b, ...patch } : b))));
 
-  const sendText = async (text: string, localKey: string, retry = false): Promise<void> => {
-    const params = await e2ee.encryptText(conversation.id, peerId, text, retry);
+  const deliver = async (build: (retry: boolean) => Promise<SendParams>, localKey: string, retry = false): Promise<void> => {
+    const params = await build(retry);
     updateBubble(localKey, { key: params.p_client_msg_id });
     const result = await rpc<SendResult>('seru24_send_message', params);
     if (result.ok) {
@@ -251,7 +262,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         sender_id: myId || null,
         seq,
         client_msg_id: params.p_client_msg_id,
-        kind: 'text',
+        kind: params.p_kind,
         ciphertext: params.p_ciphertext,
         nonce: params.p_nonce,
         sender_key_version: params.p_sender_key_version,
@@ -277,7 +288,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     }
     if (result.code === 'stale_key' && !retry) {
       setKeyStatus(await e2ee.checkPeerKey(peerId));
-      return sendText(text, params.p_client_msg_id, true);
+      return deliver(build, params.p_client_msg_id, true);
     }
     updateBubble(params.p_client_msg_id, { pending: false, failed: SEND_ERRORS[result.code ?? ''] ?? 'Pesan gagal dikirim' });
   };
@@ -287,17 +298,62 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     if (!text) return;
     setDraft('');
     setError('');
-    const localKey = `local-${Date.now()}`;
-    updateBubbles(list => [...list, {
-      key: localKey, id: null, seq: 0, mine: true, text, createdAt: new Date().toISOString(),
-      deleted: false, pending: true, failed: '',
-    }]);
-    listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    const localKey = addLocalBubble(text);
     try {
-      await sendText(text, localKey);
+      await deliver(retry => e2ee.encryptText(conversation.id, peerId, text, retry), localKey);
       if (isIncomingRequest(conversation, account.me?.id)) setConversation(c => ({ ...c, status: 'accepted' }));
     } catch (e) {
       updateBubbles(list => list.map(b => (b.pending && b.text === text ? { ...b, pending: false, failed: e instanceof Error ? e.message : 'Pesan gagal dikirim' } : b)));
+    }
+  };
+
+  const addLocalBubble = (text: string) => {
+    const localKey = `local-${randomId()}`;
+    updateBubbles(list => [...list, {
+      key: localKey, id: null, seq: 0, mine: true, text, createdAt: new Date().toISOString(),
+      deleted: false, pending: true, failed: '', file: null, progress: '',
+    }]);
+    listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    return localKey;
+  };
+
+  /** Dokumen dikirim satu per satu: enkripsi + unggah per potongan, lalu pesan berisi kunci file (E2EE). */
+  const sendFile = async (picked: PickedFile) => {
+    let key = addLocalBubble(`📎 ${safeFileName(picked.name)}`);
+    let uploaded: FileMessageBody | null = null;
+    try {
+      updateBubble(key, { progress: 'Mengenkripsi…' });
+      uploaded = await uploadFile(conversation.id, picked, (done, total) =>
+        updateBubble(key, { progress: `Mengunggah ${percent(done, total)}` }),
+      );
+      const meta = uploaded;
+      updateBubble(key, { file: meta, progress: '' });
+      await deliver(retry => e2ee.encryptFile(conversation.id, peerId, meta, retry).then(params => {
+        key = params.p_client_msg_id;
+        return params;
+      }), key);
+    } catch (e) {
+      updateBubble(key, { pending: false, progress: '', failed: e instanceof Error && e.message ? e.message : 'Dokumen gagal dikirim' });
+    }
+    // pesan gagal terkirim: jangan tinggalkan file yatim di Drive
+    const sent = bubblesRef.current.find(b => b.key === key);
+    if (uploaded && (!sent || sent.failed)) deleteRemoteFile(uploaded.id).catch(() => undefined);
+  };
+
+  const attachFiles = async () => {
+    setError('');
+    const picked = await pickFiles().catch(() => [] as PickedFile[]);
+    for (const file of picked) await sendFile(file);
+  };
+
+  const download = async (item: Bubble) => {
+    if (!item.file || item.progress) return;
+    updateBubble(item.key, { failed: '', progress: 'Mengunduh…' });
+    try {
+      await downloadFile(item.file, (done, total) => updateBubble(item.key, { progress: `Mengunduh ${percent(done, total)}` }));
+      updateBubble(item.key, { progress: 'Tersimpan di Download/seru24' });
+    } catch {
+      updateBubble(item.key, { progress: '', failed: 'Dokumen gagal diunduh' });
     }
   };
 
@@ -433,9 +489,28 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
               <Text style={ui.muted}>Pesan dihapus</Text>
             ) : item.text === null ? (
               <Text style={ui.muted}>Pesan tidak dapat dibuka</Text>
+            ) : item.file ? (
+              <View style={[ui.row, { gap: 10 }]}>
+                <Text style={{ fontSize: 22 }}>📎</Text>
+                <View style={{ flexShrink: 1 }}>
+                  <Text style={{ color: colors.text, fontWeight: '700' }}>{item.file.name}</Text>
+                  <Text style={[ui.muted, { fontSize: 12 }]}>{formatFileSize(item.file.size)}</Text>
+                </View>
+                {!item.pending ? (
+                  <Pressable
+                    onPress={() => download(item)}
+                    disabled={Boolean(item.progress) && item.progress !== 'Tersimpan di Download/seru24'}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Unduh ${item.file.name}`}
+                    style={styles.docButton}>
+                    <Text style={{ color: colors.accent, fontWeight: '600' }}>Unduh</Text>
+                  </Pressable>
+                ) : null}
+              </View>
             ) : (
               <Text style={{ color: colors.text }}>{item.text}</Text>
             )}
+            {item.progress ? <Text style={[ui.muted, { fontSize: 12 }]}>{item.progress}</Text> : null}
             <View style={[ui.row, { justifyContent: 'flex-end', gap: 10 }]}>
               <Text style={[ui.muted, { fontSize: 11 }]}>{statusOf(item)}</Text>
               {item.mine && item.id && !item.deleted ? (
@@ -453,6 +528,15 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
       />
 
       <View style={styles.composer}>
+        <Pressable
+          onPress={attachFiles}
+          disabled={cannotSend}
+          accessibilityRole="button"
+          accessibilityLabel="Kirim dokumen (maks 50 MB per file)"
+          hitSlop={6}
+          style={{ paddingHorizontal: 6, opacity: cannotSend ? 0.4 : 1 }}>
+          <Text style={{ fontSize: 22 }}>📎</Text>
+        </Pressable>
         <TextInput
           style={[ui.input, { flex: 1, maxHeight: 120 }]}
           value={draft}
@@ -484,6 +568,7 @@ const styles = StyleSheet.create({
   olderLoader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 8 },
   mine: { alignSelf: 'flex-end', backgroundColor: colors.mine },
   theirs: { alignSelf: 'flex-start', backgroundColor: colors.surface },
+  docButton: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: colors.border },
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
