@@ -2,23 +2,32 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StatusBar, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import type { Conversation } from '../../web/shared/chat-core';
-import { restoreSession } from './lib/core';
+import { loadCachedAccount, restoreSession } from './lib/core';
 import { loadNotifySetting, startNotifications, stopNotifications, updateNotificationPresence } from './lib/notify';
 import { AuthScreen } from './screens/AuthScreen';
 import { ChatListScreen } from './screens/ChatListScreen';
 import { ChatScreen } from './screens/ChatScreen';
 import { colors, ui } from './theme';
 
-type Screen = { name: 'loading' } | { name: 'auth' } | { name: 'list' } | { name: 'chat'; conversation: Conversation };
+// boot = membaca profil tersimpan (sekejap, layar kosong); loading = belum pernah masuk di perangkat ini
+type Screen = { name: 'boot' } | { name: 'loading' } | { name: 'auth' } | { name: 'list' } | { name: 'chat'; conversation: Conversation };
 
 const App = () => {
-  const [screen, setScreen] = useState<Screen>({ name: 'loading' });
+  const [screen, setScreen] = useState<Screen>({ name: 'boot' });
   const activeConversation = useRef<string | null>(null);
   const signedIn = screen.name === 'list' || screen.name === 'chat';
 
+  // Daftar chat dari cache lokal tampil seketika; sesi dan kunci dipulihkan di belakang.
   useEffect(() => {
-    restoreSession()
-      .then(status => setScreen(status === 'ready' ? { name: 'list' } : { name: 'auth' }))
+    loadCachedAccount()
+      .then(cached => {
+        setScreen(cached ? { name: 'list' } : { name: 'loading' });
+        return restoreSession();
+      })
+      .then(status => setScreen(current => {
+        if (status !== 'ready') return { name: 'auth' };
+        return current.name === 'loading' || current.name === 'boot' ? { name: 'list' } : current;
+      }))
       .catch(() => setScreen({ name: 'auth' }));
   }, []);
 
@@ -42,6 +51,8 @@ const App = () => {
 
   const content = () => {
     switch (screen.name) {
+      case 'boot':
+        return <View style={ui.screen} />;
       case 'loading':
         return (
           <View style={[ui.screen, { alignItems: 'center', justifyContent: 'center' }]}>

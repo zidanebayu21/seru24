@@ -4,6 +4,7 @@
  * Kredensial OAuth hanya di env server (NUXT_GDRIVE_*), tidak pernah dikirim ke browser (OWASP ASVS V2.10.4).
  */
 import type { H3Event } from 'h3'
+import { driveLinks, parseAppRelease, type AppRelease } from '#shared/app-release'
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const API = 'https://www.googleapis.com/drive/v3'
@@ -141,6 +142,29 @@ export const downloadRange = async (
   })
   if (!res.ok) throw await failure(res, 'unduh')
   return new Uint8Array(await res.arrayBuffer())
+}
+
+/** Penanda file APK rilis di Drive (appProperties), diisi release_apk.ps1. */
+export const APK_KIND_PROPERTY = { key: 'seru24_kind', value: 'android_apk' } as const
+
+/** APK Android terbaru di Drive akun penyimpanan; null bila belum pernah dirilis. */
+export const findApkRelease = async (config: DriveConfig): Promise<AppRelease | null> => {
+  const q = `appProperties has { key='${APK_KIND_PROPERTY.key}' and value='${APK_KIND_PROPERTY.value}' } and trashed = false`
+  const fields = 'files(id,size,modifiedTime,appProperties)'
+  const res = await driveFetch(config, `${API}/files?${new URLSearchParams({ q, fields, pageSize: '1', orderBy: 'modifiedTime desc' })}`)
+  if (!res.ok) throw await failure(res, 'cari APK')
+  const file = ((await res.json()) as {
+    files: Array<{ id: string; size?: string; modifiedTime?: string; appProperties?: Record<string, string> }>
+  }).files[0]
+  if (!file) return null
+  return parseAppRelease({
+    versionCode: Number(file.appProperties?.version_code),
+    versionName: file.appProperties?.version_name,
+    ...driveLinks(file.id),
+    sha256: file.appProperties?.sha256,
+    sizeBytes: Number(file.size ?? 0),
+    updatedAt: file.modifiedTime ?? '',
+  })
 }
 
 /** Hapus permanen (tidak lewat Trash). File yang sudah tidak ada dianggap berhasil. */

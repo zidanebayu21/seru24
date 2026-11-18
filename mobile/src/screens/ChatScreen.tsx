@@ -22,7 +22,7 @@ import {
   loadLocalConversationState,
   saveLocalMessages,
 } from '../lib/chatStorage';
-import { account, deleteRemoteFile, e2ee, inbox, rpc } from '../lib/core';
+import { account, deleteRemoteFile, e2ee, inbox, rpc, whenAccountReady } from '../lib/core';
 import { notifyMessageSent } from '../lib/notify';
 import { Button } from '../components/Button';
 import { MenuItem, PopupMenu } from '../components/PopupMenu';
@@ -54,6 +54,8 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
+  // aplikasi baru dibuka: kunci chat masih dipulihkan di belakang
+  const [preparing, setPreparing] = useState(account.status !== 'ready');
   const listRef = useRef<FlatList<Bubble>>(null);
   const bubblesRef = useRef<Bubble[]>([]);
   const allMessagesRef = useRef<ChatMessage[]>([]);
@@ -108,6 +110,12 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         deletedIdsRef.current = localState.deletedIds;
         clearedUpToSeqRef.current = localState.clearedUpToSeq;
         allMessagesRef.current = localState.messages;
+
+        // pesan hanya bisa didekripsi setelah kunci chat dari Keystore siap
+        const ready = await whenAccountReady();
+        if (!alive) return;
+        setPreparing(false);
+        if (ready !== 'ready') return;
 
         setKeyStatus(await e2ee.checkPeerKey(peerId));
 
@@ -388,7 +396,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
             <Button label="Saya sudah cocokkan" variant="plain" onPress={trustNewKey} />
           </View>
         ) : null}
-        {keyStatus.status === 'missing' ? (
+        {keyStatus.status === 'missing' && !preparing ? (
           <Text style={ui.notice}>Lawan bicara belum menyiapkan kunci enkripsi, jadi pesan belum bisa dikirim.</Text>
         ) : null}
         {isIncomingRequest(conversation, account.me?.id) ? (
@@ -412,10 +420,10 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         onEndReached={loadOlder}
         onEndReachedThreshold={CHAT_MOBILE_PREFETCH_SCREENS}
         ListFooterComponent={
-          loadingOlder ? (
+          loadingOlder || preparing ? (
             <View style={styles.olderLoader}>
               <ActivityIndicator size="small" color={colors.accent} />
-              <Text style={ui.muted}>Memuat pesan lama…</Text>
+              <Text style={ui.muted}>{preparing ? 'Membuka kunci chat…' : 'Memuat pesan lama…'}</Text>
             </View>
           ) : null
         }

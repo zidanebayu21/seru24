@@ -6,6 +6,7 @@ import {
   resetFullLocalStorage,
   type LocalChatStorageStats,
 } from '../lib/chatStorage';
+import { APP_VERSION_NAME } from '../env';
 import { account, signOut, webUrl } from '../lib/core';
 import { disableNotifications, enableNotifications, isNotifyEnabled, notifySupported } from '../lib/notify';
 import { colors, ui } from '../theme';
@@ -121,6 +122,7 @@ export const AccountMenu = ({ onSignedOut }: Props) => {
         <View style={styles.who}>
           <Text style={{ fontWeight: '700', color: colors.text }}>{name}</Text>
           <Text style={ui.muted}>@{me?.username}</Text>
+          <Text style={[ui.muted, { fontSize: 11 }]}>seru24 Android v{APP_VERSION_NAME}</Text>
         </View>
         <MenuItem label="Edit profil" onPress={() => openWeb('/akun/profil')} />
         <MenuItem label="Ganti password" onPress={() => openWeb('/akun/password')} />

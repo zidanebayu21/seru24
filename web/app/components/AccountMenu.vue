@@ -1,5 +1,8 @@
 <script setup lang="ts">
+import { parseAppRelease, type AppRelease } from '#shared/app-release'
+
 const open = ref(false)
+const androidRelease = ref<AppRelease | null>(null)
 const root = ref<HTMLElement | null>(null)
 
 const name = computed(() => account.me?.display_name || account.me?.username || '')
@@ -30,6 +33,11 @@ const onKey = (event: KeyboardEvent) => {
 onMounted(() => {
   document.addEventListener('click', onOutside)
   document.addEventListener('keydown', onKey)
+  // versi APK Android terbaru dan link Google Drive-nya (diunggah release_apk.ps1)
+  fetch('/api/app/latest')
+    .then((res) => (res.ok ? res.json() : null))
+    .then((data) => { androidRelease.value = parseAppRelease(data?.latest) })
+    .catch(() => undefined)
 })
 onBeforeUnmount(() => {
   document.removeEventListener('click', onOutside)
@@ -88,6 +96,14 @@ const logout = async () => {
         <span class="switch" :class="{ on: notifyState.enabled }" aria-hidden="true" />
       </button>
       <p v-if="notifyHint" class="hint">{{ notifyHint }}</p>
+      <a
+        v-if="androidRelease"
+        :href="androidRelease.url"
+        target="_blank"
+        rel="noopener noreferrer"
+        role="menuitem"
+        @click="close"
+      >Unduh aplikasi Android v{{ androidRelease.versionName }}</a>
       <button type="button" role="menuitem" class="danger" @click="logout">Keluar</button>
     </div>
   </div>

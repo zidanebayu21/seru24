@@ -92,8 +92,8 @@ android {
         applicationId "id.seru24.chat"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 3
-        versionName "1.3"
+        versionCode 5
+        versionName "1.5"
     }
     signingConfigs {
         debug {
@@ -122,6 +122,13 @@ android {
             shrinkResources enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }
+    }
+    // APK dibagikan langsung (bukan lewat Play Store): library native dikompresi agar file APK sekitar 8 MB
+    // lebih kecil. Konsekuensinya library diekstrak saat instal, jadi memakai sedikit lebih banyak ruang di HP.
+    packaging {
+        jniLibs { useLegacyPackaging = true }
+        // BouncyCastle hanya dipakai untuk SCrypt (ScryptModule); file data algoritma lain (mis. Picnic) tidak dibaca.
+        resources { excludes += ['org/bouncycastle/**'] }
     }
     applicationVariants.all { variant ->
         variant.outputs.all {

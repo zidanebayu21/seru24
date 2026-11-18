@@ -26,6 +26,12 @@ const strings = KEYS.map(key => `export const ${key} = ${JSON.stringify(values[k
 const numbers = Object.entries(DEFAULTS).map(
   ([key, fallback]) => `export const ${key} = ${Number(values[key] || fallback)};`,
 );
-const body = [...strings, ...numbers].join('\n');
+// versi aplikasi dari build.gradle (dinaikkan build.ps1), untuk ditampilkan dan dibandingkan dengan /api/app/latest
+const gradle = fs.readFileSync(path.join(__dirname, '..', 'android', 'app', 'build.gradle'), 'utf8');
+const version = [
+  `export const APP_VERSION_CODE = ${Number(/versionCode\s+(\d+)/.exec(gradle)?.[1] ?? 0)};`,
+  `export const APP_VERSION_NAME = ${JSON.stringify(/versionName\s+"([^"]+)"/.exec(gradle)?.[1] ?? '0')};`,
+];
+const body = [...strings, ...numbers, ...version].join('\n');
 fs.writeFileSync(path.join(__dirname, '..', 'src', 'env.ts'), `// Dibuat otomatis oleh scripts/gen-env.js. Jangan diedit.\n${body}\n`);
 console.log('gen-env: src/env.ts diperbarui');

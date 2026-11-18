@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
 import { formatTime, isIncomingRequest, peerLabel, type Conversation, type FoundUser } from '../../../web/shared/chat-core';
 import { loadLocalConversations, saveLocalConversations } from '../lib/chatStorage';
 import { account, inbox, listConversations, rpc } from '../lib/core';
 import { AccountMenu } from '../components/AccountMenu';
 import { Button } from '../components/Button';
+import { UpdateBanner } from '../components/UpdateBanner';
 import { colors, ui } from '../theme';
 
 interface Props {
@@ -20,6 +21,8 @@ export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  // sinkronisasi dengan server berjalan di belakang daftar dari cache lokal
+  const [syncing, setSyncing] = useState(true);
 
   const load = useCallback(async () => {
     const myId = account.me?.id;
@@ -31,6 +34,7 @@ export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
         setConversations(prev => (prev.length === 0 ? cached : prev));
       }
     }
+    setSyncing(true);
     try {
       const fresh = await listConversations();
       setConversations(fresh);
@@ -38,6 +42,8 @@ export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
       if (myId) saveLocalConversations(myId, fresh).catch(() => undefined);
     } catch {
       if (!hasCached) setError('Gagal memuat percakapan');
+    } finally {
+      setSyncing(false);
     }
   }, []);
 
@@ -102,9 +108,14 @@ export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
   return (
     <View style={[ui.screen, { padding: 16, gap: 12 }]}>
       <View style={[ui.row, { justifyContent: 'space-between' }]}>
-        <Text style={ui.brand}>seru24</Text>
+        <View style={[ui.row, { gap: 8 }]}>
+          <Text style={ui.brand}>seru24</Text>
+          {syncing ? <ActivityIndicator size="small" color={colors.accent} accessibilityLabel="Menyinkronkan" /> : null}
+        </View>
         <AccountMenu onSignedOut={onSignedOut} />
       </View>
+
+      <UpdateBanner />
 
       <View style={ui.row}>
         <TextInput

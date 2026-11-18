@@ -89,12 +89,21 @@ export const createAccountCore = (deps: AccountDeps, state: AccountState) => {
     return ring
   }
 
-  const bootstrapAccount = async (afterLogin = false): Promise<AccountStatus> => {
-    await deps.rpc('seru24_register_device', { p_platform: deps.platform, p_name: deps.deviceName(), p_after_login: afterLogin })
-    const me = await deps.rpc<Me>('seru24_me')
+  /**
+   * knownUserId = pengguna terakhir di perangkat ini: kunci lokalnya dibaca bersamaan dengan panggilan jaringan
+   * agar startup tidak menunggu berurutan; dipakai hanya bila cocok dengan hasil seru24_me.
+   */
+  const bootstrapAccount = async (afterLogin = false, knownUserId?: string): Promise<AccountStatus> => {
+    const preloaded = knownUserId ? deps.keyStore.load(knownUserId).catch(() => null) : null
+    const [, me] = await Promise.all([
+      deps.rpc('seru24_register_device', { p_platform: deps.platform, p_name: deps.deviceName(), p_after_login: afterLogin }),
+      deps.rpc<Me>('seru24_me'),
+    ])
     state.me = me
 
-    keyring = me.has_keys ? await deps.keyStore.load(me.id) : null
+    keyring = !me.has_keys ? null
+      : preloaded && me.id === knownUserId ? await preloaded
+      : await deps.keyStore.load(me.id)
     // kunci lokal versi lama (setelah reset password di perangkat lain) dianggap tidak ada
     if (keyring && !keyring[String(me.key_version)]) keyring = null
     const material = takePendingMaterial()

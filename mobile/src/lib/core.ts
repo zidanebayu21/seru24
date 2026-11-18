@@ -6,7 +6,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { fromBase64, toBase64, type SecretKeyring } from '../../../web/shared/crypto';
 import { SecureFetchError, createSecureFetch } from '../../../web/shared/secure-fetch-core';
 import { createSessionCore } from '../../../web/shared/session-core';
-import { createAccountCore, type AccountState, type AccountStatus } from '../../../web/shared/account-core';
+import { createAccountCore, type AccountState, type AccountStatus, type Me } from '../../../web/shared/account-core';
 import { createE2ee } from '../../../web/shared/e2ee-core';
 import { createInbox } from '../../../web/shared/inbox-core';
 import type { Conversation } from '../../../web/shared/chat-core';
@@ -132,13 +132,39 @@ export const deleteRemoteFile = async (id: string) => {
   if (token) await secureFetch('/api/files/delete', { access_token: token, id });
 };
 
-/** Saat aplikasi dibuka: pulihkan sesi (cookie refresh) dan kunci chat dari Keystore. */
-export const restoreSession = async (): Promise<AccountStatus> => {
-  await Promise.all([loadVisitorKey(), installNativeScrypt()]);
-  if (!(await session.getAccessToken())) return 'unknown';
+// Profil terakhir yang berhasil masuk (id, username, nama; bukan rahasia) agar daftar chat dari cache lokal
+// bisa langsung tampil saat aplikasi dibuka, sementara sesi dipulihkan di belakang.
+const LAST_ME_SERVICE = 'seru24.last_me';
+let accountReady: Promise<AccountStatus> | null = null;
+
+const rememberAccount = () =>
+  account.me ? writeSecure(LAST_ME_SERVICE, JSON.stringify(account.me)).catch(() => undefined) : undefined;
+const forgetCachedAccount = () => removeSecure(LAST_ME_SERVICE).catch(() => undefined);
+
+/** true = ada profil tersimpan dan account.me sudah diisi darinya (status tetap 'unknown' sampai sesi pulih). */
+export const loadCachedAccount = async (): Promise<boolean> => {
+  const raw = await readSecure(LAST_ME_SERVICE).catch(() => null);
+  if (!raw) return false;
   try {
-    const status = await accountApi.bootstrapAccount(false);
+    const me = JSON.parse(raw) as Me;
+    if (typeof me?.id !== 'string') return false;
+    account.me = me;
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const restoreSessionNow = async (): Promise<AccountStatus> => {
+  await Promise.all([loadVisitorKey(), installNativeScrypt()]);
+  if (!(await session.getAccessToken())) {
+    await forgetCachedAccount();
+    return 'unknown';
+  }
+  try {
+    const status = await accountApi.bootstrapAccount(false, account.me?.id);
     if (status !== 'ready') await signOut();
+    else await rememberAccount();
     return status;
   } catch {
     await signOut();
@@ -146,9 +172,20 @@ export const restoreSession = async (): Promise<AccountStatus> => {
   }
 };
 
+/** Saat aplikasi dibuka: pulihkan sesi (cookie refresh) dan kunci chat dari Keystore. */
+export const restoreSession = (): Promise<AccountStatus> => {
+  accountReady = restoreSessionNow();
+  return accountReady;
+};
+
+/** Tunggu sesi dan kunci chat siap (layar chat memakainya sebelum mendekripsi pesan). */
+export const whenAccountReady = (): Promise<AccountStatus> => accountReady ?? Promise.resolve(account.status);
+
 /** Setelah login/daftar: kunci chat dibuat atau dipulihkan dengan wrap_key dari password. */
 export const finishSignIn = async () => {
   if ((await accountApi.bootstrapAccount(true)) !== 'ready') throw new Error('Kunci chat tidak bisa dibuka');
+  accountReady = Promise.resolve('ready');
+  await rememberAccount();
 };
 
 const signOutCleanups = new Set<() => Promise<void>>();
@@ -162,6 +199,8 @@ export const signOut = async () => {
     await cleanup().catch(() => undefined);
   }
   inbox.closeInbox();
+  accountReady = null;
+  await forgetCachedAccount();
   await accountApi.resetAccount();
   e2ee.resetE2ee();
   await session.logoutSession();
