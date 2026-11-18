@@ -26,6 +26,7 @@ interface NativeFilesModule {
     id: string, apiBase: string, token: string, key: string, iv: string, name: string, mime: string, size: number,
   ) => Promise<string>;
   openFile: (uri: string, mime: string) => Promise<void>;
+  savedFile: (id: string) => Promise<string | null>;
 }
 
 export type Progress = (done: number, total: number) => void;
@@ -79,12 +80,20 @@ export const uploadFile = async (conversationId: string, file: PickedFile, onPro
   };
 };
 
-/** Unduh, dekripsi, dan simpan ke Download/seru24, lalu buka dengan aplikasi yang sesuai. */
-export const downloadFile = async (file: FileMessageBody, onProgress?: Progress): Promise<void> => {
+/** Lokasi file yang sudah pernah diunduh (masih ada di HP); null bila belum. */
+export const findSavedFile = (id: string): Promise<string | null> =>
+  native ? native.savedFile(id).catch(() => null) : Promise.resolve(null);
+
+/** Buka file lokal dengan aplikasi yang sesuai (PDF, gambar, dll.). */
+export const openSavedFile = (uri: string, mime: string): Promise<void> => requireNative().openFile(uri, mime);
+
+/** Unduh, dekripsi, dan simpan ke Download/seru24, lalu buka; hasilnya lokasi file lokal. */
+export const downloadFile = async (file: FileMessageBody, onProgress?: Progress): Promise<string> => {
   const files = requireNative();
   const token = await requireToken();
   const uri = await withProgress(file.id, onProgress, () =>
     files.downloadAndSave(file.id, API_BASE_URL, token, file.key, file.iv, file.name, file.mime, file.size),
   );
   await files.openFile(uri, file.mime).catch(() => undefined);
+  return uri;
 };

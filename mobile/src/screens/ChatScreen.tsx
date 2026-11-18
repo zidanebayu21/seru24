@@ -24,7 +24,7 @@ import {
   saveLocalMessages,
 } from '../lib/chatStorage';
 import { account, deleteRemoteFile, e2ee, inbox, rpc, whenAccountReady } from '../lib/core';
-import { downloadFile, pickFiles, uploadFile, type PickedFile } from '../lib/files';
+import { downloadFile, findSavedFile, openSavedFile, pickFiles, uploadFile, type PickedFile } from '../lib/files';
 import { notifyMessageSent } from '../lib/notify';
 import { Button } from '../components/Button';
 import { MenuItem, PopupMenu } from '../components/PopupMenu';
@@ -43,9 +43,13 @@ interface Bubble {
   file: FileMessageBody | null;
   /** Status unggah/unduh dokumen yang sedang berjalan. */
   progress: string;
+  /** File sudah diunduh ke HP: tombol jadi "Buka" (tanpa unduh ulang). */
+  savedUri: string | null;
 }
 
 type SendParams = Awaited<ReturnType<typeof e2ee.encryptText>> & { p_attachment_id?: string };
+
+const SAVED_NOTE = 'Tersimpan di Download/seru24';
 
 const percent = (done: number, total: number) => `${Math.round((done / Math.max(total, 1)) * 100)}%`;
 
@@ -83,6 +87,12 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     });
   }, []);
 
+  const fileState = useCallback(async (m: ChatMessage) => {
+    const file = await e2ee.decryptFile(m, peerId);
+    const savedUri = file ? await findSavedFile(file.id) : null;
+    return { file, savedUri, progress: savedUri ? SAVED_NOTE : '' };
+  }, [peerId]);
+
   const toBubble = useCallback(async (m: ChatMessage): Promise<Bubble> => ({
     key: m.client_msg_id,
     id: m.id,
@@ -93,9 +103,8 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     deleted: Boolean(m.deleted_at),
     pending: false,
     failed: '',
-    file: await e2ee.decryptFile(m, peerId),
-    progress: '',
-  }), [peerId]);
+    ...(await fileState(m)),
+  }), [peerId, fileState]);
 
   const markRead = useCallback((seq: number) => {
     if (seq > 0) rpc('seru24_mark_read', { p_conversation_id: conversation.id, p_seq: seq }).catch(() => undefined);
@@ -311,7 +320,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     const localKey = `local-${randomId()}`;
     updateBubbles(list => [...list, {
       key: localKey, id: null, seq: 0, mine: true, text, createdAt: new Date().toISOString(),
-      deleted: false, pending: true, failed: '', file: null, progress: '',
+      deleted: false, pending: true, failed: '', file: null, progress: '', savedUri: null,
     }]);
     listRef.current?.scrollToOffset({ offset: 0, animated: true });
     return localKey;
@@ -346,12 +355,24 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     for (const file of picked) await sendFile(file);
   };
 
-  const download = async (item: Bubble) => {
-    if (!item.file || item.progress) return;
+  /** Sudah tersimpan di HP: langsung buka; bila filenya sudah dihapus dari HP, unduh ulang. */
+  const openOrDownload = async (item: Bubble) => {
+    if (!item.file) return;
+    if (item.savedUri) {
+      const still = await findSavedFile(item.file.id);
+      if (still) {
+        await openSavedFile(still, item.file.mime)
+          .catch(() => updateBubble(item.key, { failed: 'Tidak ada aplikasi untuk membuka file ini' }));
+        return;
+      }
+      updateBubble(item.key, { savedUri: null, progress: '' });
+    } else if (item.progress) {
+      return;
+    }
     updateBubble(item.key, { failed: '', progress: 'Mengunduh…' });
     try {
-      await downloadFile(item.file, (done, total) => updateBubble(item.key, { progress: `Mengunduh ${percent(done, total)}` }));
-      updateBubble(item.key, { progress: 'Tersimpan di Download/seru24' });
+      const uri = await downloadFile(item.file, (done, total) => updateBubble(item.key, { progress: `Mengunduh ${percent(done, total)}` }));
+      updateBubble(item.key, { progress: SAVED_NOTE, savedUri: uri });
     } catch {
       updateBubble(item.key, { progress: '', failed: 'Dokumen gagal diunduh' });
     }
@@ -498,12 +519,12 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
                 </View>
                 {!item.pending ? (
                   <Pressable
-                    onPress={() => download(item)}
-                    disabled={Boolean(item.progress) && item.progress !== 'Tersimpan di Download/seru24'}
+                    onPress={() => openOrDownload(item)}
+                    disabled={Boolean(item.progress) && !item.savedUri}
                     accessibilityRole="button"
-                    accessibilityLabel={`Unduh ${item.file.name}`}
+                    accessibilityLabel={`${item.savedUri ? 'Buka' : 'Unduh'} ${item.file.name}`}
                     style={styles.docButton}>
-                    <Text style={{ color: colors.accent, fontWeight: '600' }}>Unduh</Text>
+                    <Text style={{ color: colors.accent, fontWeight: '600' }}>{item.savedUri ? 'Buka' : 'Unduh'}</Text>
                   </Pressable>
                 ) : null}
               </View>

@@ -3,6 +3,8 @@ package id.seru24.chat;
 import android.app.Activity;
 import android.content.ContentResolver;
 import android.content.ContentValues;
+import android.content.Context;
+import android.content.SharedPreferences;
 import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
@@ -180,12 +182,38 @@ public class FileModule extends ReactContextBaseJavaModule {
                 values.clear();
                 values.put(MediaStore.Downloads.IS_PENDING, 0);
                 resolver.update(saved, values, null, null);
+                downloads().edit().putString(id, saved.toString()).apply();
                 promise.resolve(saved.toString());
             } catch (Exception e) {
                 if (saved != null) resolver.delete(saved, null, null);
                 promise.reject("download_error", e.getMessage(), e);
             }
         });
+    }
+
+    /** Lokasi file yang sudah pernah diunduh untuk lampiran ini; null bila belum ada atau sudah dihapus pengguna. */
+    @ReactMethod
+    public void savedFile(String id, Promise promise) {
+        String uri = downloads().getString(id, null);
+        if (uri == null) {
+            promise.resolve(null);
+            return;
+        }
+        try (Cursor cursor = getReactApplicationContext().getContentResolver().query(Uri.parse(uri), null, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                promise.resolve(uri);
+                return;
+            }
+        } catch (Exception ignored) {
+            // file dihapus atau tidak bisa diakses lagi: dianggap belum diunduh
+        }
+        downloads().edit().remove(id).apply();
+        promise.resolve(null);
+    }
+
+    /** Peta id lampiran -> content URI hasil unduhan (hanya lokasi file, tanpa kunci atau isi). */
+    private SharedPreferences downloads() {
+        return getReactApplicationContext().getSharedPreferences("seru24_downloads", Context.MODE_PRIVATE);
     }
 
     /** Buka file hasil unduhan dengan aplikasi yang sesuai (PDF, gambar, dll.). */
