@@ -47,7 +47,9 @@ $auth = @{ Authorization = "Bearer $token" }
 
 function Find-Files([string]$q) {
     $uri = "$api/files?q=$([uri]::EscapeDataString($q))&fields=files(id)&pageSize=1"
-    return @((Invoke-RestMethod -Uri $uri -Headers $auth).files)
+    # koma: tetap array walau isinya satu (tanpa ini PowerShell 5.1 membukanya jadi objek tunggal tanpa .Count,
+    # sehingga file/folder lama dianggap tidak ada dan setiap rilis membuat salinan baru)
+    return ,@((Invoke-RestMethod -Uri $uri -Headers $auth).files)
 }
 
 function Get-Folder([string]$folderName, [string]$parent) {
