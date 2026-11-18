@@ -182,35 +182,6 @@ public class ChatStoreModule extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
-    public void deleteMessage(String userId, String conversationId, String clientMsgId, double seq, Promise promise) {
-        EXECUTOR.execute(() -> {
-            try {
-                SQLiteDatabase db = getDb();
-                String cacheKey = userId + ":" + conversationId + ":" + clientMsgId;
-                long now = System.currentTimeMillis();
-                db.beginTransaction();
-                try {
-                    db.delete("messages", "cache_key = ?", new String[]{cacheKey});
-                    ContentValues cv = new ContentValues();
-                    cv.put("cache_key", cacheKey);
-                    cv.put("user_id", userId);
-                    cv.put("conversation_id", conversationId);
-                    cv.put("client_msg_id", clientMsgId);
-                    cv.put("seq", (long) seq);
-                    cv.put("deleted_at", now);
-                    db.insertWithOnConflict("deleted_msgs", null, cv, SQLiteDatabase.CONFLICT_REPLACE);
-                    db.setTransactionSuccessful();
-                } finally {
-                    db.endTransaction();
-                }
-                promise.resolve(null);
-            } catch (Exception e) {
-                promise.reject("chat_store_error", e);
-            }
-        });
-    }
-
-    @ReactMethod
     public void clearConversation(String userId, String conversationId, double upToSeq, Promise promise) {
         EXECUTOR.execute(() -> {
             try {

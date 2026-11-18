@@ -355,6 +355,10 @@ export const sendSmtpMail = async (
     }
 
     if (config.user && config.pass) {
+      // Kredensial hanya dikirim lewat kanal terenkripsi (OWASP ASVS V9.2.1, CWE-319).
+      if (!config.secure && !supportsStartTls) {
+        throw new Error('Server SMTP tidak mendukung TLS/STARTTLS; kredensial tidak dikirim')
+      }
       await reader.command('AUTH LOGIN', [334])
       await reader.command(Buffer.from(config.user, 'utf8').toString('base64'), [334])
       await reader.command(Buffer.from(config.pass, 'utf8').toString('base64'), [235])

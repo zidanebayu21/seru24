@@ -7,6 +7,7 @@ import {
   SEND_ERRORS,
   formatTime,
   isIncomingRequest,
+  markMessageDeleted,
   mergeCachedMessages,
   mergePagedBubbles,
   oldestPersistedSeq,
@@ -18,7 +19,6 @@ import {
 import type { ChatMessage, PeerKeyStatus } from '../../../web/shared/e2ee-core';
 import {
   clearLocalConversation,
-  deleteLocalMessage,
   loadLocalConversationState,
   saveLocalMessages,
 } from '../lib/chatStorage';
@@ -307,15 +307,17 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     setKeyStatus(await e2ee.checkPeerKey(peerId));
   };
 
-  const removeMessageLocal = async (item: Bubble) => {
-    if (item.pending) return;
+  const removeMessage = async (item: Bubble) => {
+    if (!item.id) return;
+    if (!(await rpc<boolean>('seru24_delete_message', { p_message_id: item.id }).catch(() => false))) return;
+    updateBubble(item.key, { deleted: true, text: null });
+    // Samakan cache lokal dengan server agar ciphertext pesan yang dihapus tidak tertinggal di HP.
+    const cached = allMessagesRef.current.find(m => m.client_msg_id === item.key);
     const myId = account.me?.id ?? '';
-    if (myId) {
-      await deleteLocalMessage(myId, conversation.id, item.key, item.seq).catch(() => undefined);
-    }
-    deletedIdsRef.current.add(item.key);
-    allMessagesRef.current = allMessagesRef.current.filter(m => m.client_msg_id !== item.key);
-    updateBubbles(list => list.filter(b => b.key !== item.key));
+    if (!cached) return;
+    const deleted = markMessageDeleted(cached);
+    allMessagesRef.current = mergeCachedMessages(allMessagesRef.current, [deleted], deletedIdsRef.current, clearedUpToSeqRef.current);
+    if (myId) saveLocalMessages(myId, conversation.id, [deleted]).catch(() => undefined);
   };
 
   const clearChatLocally = async () => {
@@ -408,9 +410,9 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
             )}
             <View style={[ui.row, { justifyContent: 'flex-end', gap: 10 }]}>
               <Text style={[ui.muted, { fontSize: 11 }]}>{statusOf(item)}</Text>
-              {!item.pending ? (
-                <Pressable onPress={() => removeMessageLocal(item)}>
-                  <Text style={[ui.muted, { fontSize: 11, textDecorationLine: 'underline' }]}>Hapus lokal</Text>
+              {item.mine && item.id && !item.deleted ? (
+                <Pressable onPress={() => removeMessage(item)}>
+                  <Text style={[ui.muted, { fontSize: 11, textDecorationLine: 'underline' }]}>Hapus</Text>
                 </Pressable>
               ) : null}
             </View>

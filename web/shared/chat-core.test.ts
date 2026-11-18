@@ -3,6 +3,7 @@ import {
   CHAT_MOBILE_PREFETCH_SCREENS,
   CHAT_PAGE_SIZE,
   CHAT_PREFETCH_OFFSET,
+  markMessageDeleted,
   mergeCachedMessages,
   mergePagedBubbles,
   oldestPersistedSeq,
@@ -56,6 +57,18 @@ describe('paginasi pesan', () => {
       { client_msg_id: 'c3', seq: 3, edited_at: '2026-11-18T00:00:00Z' },
       { client_msg_id: 'c4', seq: 4, edited_at: null },
     ])
+  })
+
+  it('menandai pesan terhapus dengan mengosongkan isi terenkripsi', () => {
+    const msg = { client_msg_id: 'c1', seq: 1, ciphertext: 'abc', nonce: 'n', deleted_at: null }
+    expect(markMessageDeleted(msg, '2026-11-18T00:00:00Z')).toEqual({
+      client_msg_id: 'c1',
+      seq: 1,
+      ciphertext: null,
+      nonce: null,
+      deleted_at: '2026-11-18T00:00:00Z',
+    })
+    expect(msg.ciphertext).toBe('abc')
   })
 
   it('memotong halaman pesan lokal untuk muat awal dan scroll ke atas', () => {

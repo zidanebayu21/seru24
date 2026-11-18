@@ -9,6 +9,7 @@ const storageBusy = ref(false)
 const storageNotice = ref('')
 const storageError = ref('')
 const confirmReset = ref(false)
+const perChat = ref<LocalConversationUsage[]>([])
 
 const formatBytes = (bytes: number | null) => {
   if (bytes === null) return 'tidak diketahui'
@@ -20,7 +21,7 @@ const formatBytes = (bytes: number | null) => {
 const refreshStats = async () => {
   const myId = account.me?.id ?? ''
   if (!myId) return
-  stats.value = await getLocalChatStorageStats(myId)
+  ;[stats.value, perChat.value] = await Promise.all([getLocalChatStorageStats(myId), getLocalConversationUsage(myId)])
 }
 
 const submit = async () => {
@@ -38,40 +39,46 @@ const submit = async () => {
   }
 }
 
-const clearChats = async () => {
+const runStorageAction = async (action: () => Promise<void>, notice: string, failure: string) => {
   storageBusy.value = true
   storageNotice.value = ''
   storageError.value = ''
   confirmReset.value = false
   try {
-    await clearAllLocalChats(account.me?.id)
+    await action()
     await refreshStats()
-    storageNotice.value = 'Semua riwayat chat lokal di browser ini telah dibersihkan (kunci enkripsi tetap aman).'
+    storageNotice.value = notice
   } catch {
-    storageError.value = 'Gagal membersihkan cache chat lokal.'
+    storageError.value = failure
   } finally {
     storageBusy.value = false
   }
 }
+
+const clearChats = () =>
+  runStorageAction(
+    () => clearAllLocalChats(account.me?.id),
+    'Semua riwayat chat lokal di browser ini telah dibersihkan (kunci enkripsi tetap aman).',
+    'Gagal membersihkan cache chat lokal.',
+  )
+
+const clearOneChat = (item: LocalConversationUsage) =>
+  runStorageAction(
+    () => clearLocalConversation(account.me?.id ?? '', item.conversationId, item.maxSeq),
+    `Riwayat chat ${item.label || 'ini'} di browser ini telah dihapus.`,
+    'Gagal menghapus riwayat chat lokal.',
+  )
 
 const resetBrowserData = async () => {
   if (!confirmReset.value) {
     confirmReset.value = true
     return
   }
-  storageBusy.value = true
-  storageNotice.value = ''
-  storageError.value = ''
-  confirmReset.value = false
-  try {
-    await resetFullLocalStorage({ includeKeyring: false })
-    await refreshStats()
-    storageNotice.value = 'Database chat lokal di browser telah dihapus dan direset penuh.'
-  } catch {
-    storageError.value = 'Gagal mereset penyimpanan browser.'
-  } finally {
-    storageBusy.value = false
-  }
+  await runStorageAction(
+    () => resetFullLocalStorage({ includeKeyring: false }),
+    'Database chat lokal di browser telah dihapus dan direset penuh.',
+    'Gagal mereset penyimpanan browser.',
+  )
 }
 
 onMounted(() => {
@@ -104,6 +111,16 @@ onMounted(() => {
           ({{ formatBytes(stats.usageBytes) }})
         </p>
       </div>
+      <ul v-if="perChat.length > 0" class="per-chat">
+        <li v-for="item in perChat" :key="item.conversationId" class="row">
+          <span class="grow">
+            <strong>{{ item.label || 'Percakapan' }}</strong>
+            <span class="muted"> · {{ item.messages }} pesan · {{ formatBytes(item.bytes) }}</span>
+          </span>
+          <button type="button" class="link" :disabled="storageBusy" @click="clearOneChat(item)">Hapus</button>
+        </li>
+      </ul>
+      <p v-else class="muted">Belum ada pesan yang tersimpan di browser ini.</p>
       <p v-if="storageNotice" class="notice">{{ storageNotice }}</p>
       <p v-if="storageError" class="error" role="alert">{{ storageError }}</p>
       <div class="stack actions">
@@ -128,4 +145,7 @@ onMounted(() => {
 .subhead { margin: 0 0 4px; font-size: 16px; }
 .storage-box p { margin: 0; }
 .actions { gap: 8px; }
+.per-chat { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.per-chat li { justify-content: space-between; gap: 8px; }
+.grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 </style>

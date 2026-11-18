@@ -3,6 +3,7 @@ import { MAX_TEXT_LENGTH } from '#shared/crypto'
 import {
   CHAT_PAGE_SIZE,
   CHAT_PREFETCH_OFFSET,
+  markMessageDeleted,
   mergeCachedMessages,
   mergePagedBubbles,
   oldestPersistedSeq,
@@ -272,14 +273,14 @@ const send = async () => {
 }
 
 const removeMessage = async (bubble: Bubble) => {
-  if (bubble.pending) return
-  const myId = account.me?.id ?? ''
-  if (myId) {
-    await deleteLocalMessage(myId, conversationId, bubble.key, bubble.seq)
+  if (!bubble.id) return
+  if (await rpc<boolean>('seru24_delete_message', { p_message_id: bubble.id }).catch(() => false)) {
+    bubble.deleted = true
+    bubble.text = null
+    // Samakan cache lokal dengan server agar ciphertext pesan yang dihapus tidak tertinggal di browser.
+    const cached = allMessages.value.find((m) => m.client_msg_id === bubble.key)
+    if (cached) await upsert(markMessageDeleted(cached))
   }
-  deletedIds.value.add(bubble.key)
-  allMessages.value = allMessages.value.filter((m) => m.client_msg_id !== bubble.key)
-  bubbles.value = bubbles.value.filter((b) => b.key !== bubble.key)
 }
 
 const clearChatLocally = async () => {
@@ -387,7 +388,7 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
         <p v-else class="text">{{ b.text }}</p>
         <div class="foot row">
           <span class="muted">{{ status(b) }}</span>
-          <button v-if="!b.pending" type="button" class="link" @click="removeMessage(b)">Hapus lokal</button>
+          <button v-if="b.mine && b.id && !b.deleted" type="button" class="link" @click="removeMessage(b)">Hapus</button>
         </div>
       </div>
     </div>

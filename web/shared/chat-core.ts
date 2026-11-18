@@ -111,6 +111,12 @@ export const mergeCachedMessages = <T extends CacheableMessage>(
   return [...byId.values()].sort((a, b) => a.seq - b.seq)
 }
 
+/** Salinan pesan yang ditandai terhapus di server, sama seperti hasil seru24_delete_message (isi dikosongkan). */
+export const markMessageDeleted = <T extends CacheableMessage & { ciphertext: string | null; nonce: string | null }>(
+  message: T,
+  deletedAt = new Date().toISOString(),
+): T => ({ ...message, ciphertext: null, nonce: null, deleted_at: deletedAt })
+
 /** Ambil satu halaman pesan (urut naik) dari kumpulan pesan lokal. */
 export const sliceMessagesPage = <T extends { seq: number }>(
   messages: readonly T[],

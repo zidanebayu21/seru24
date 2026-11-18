@@ -14,7 +14,6 @@ jest.mock('../src/lib/core', () => ({
 import {
   clearAllLocalChats,
   clearLocalConversation,
-  deleteLocalMessage,
   getLocalChatStorageStats,
   loadLocalConversations,
   loadLocalConversationState,
@@ -74,7 +73,7 @@ describe('mobile chatStorage', () => {
     expect(mockSecureStore.has('seru24.chat_wrap.u1')).toBe(true);
   });
 
-  it('menyimpan pesan, menghapus 1 pesan lokal (tombstone), dan membersihkan 1 percakapan', async () => {
+  it('menyimpan pesan dan membersihkan 1 percakapan sampai seq tertentu', async () => {
     const m1 = makeMsg('conv1', 'cm1', 1);
     const m2 = makeMsg('conv1', 'cm2', 2);
     const m3 = makeMsg('conv1', 'cm3', 3);
@@ -84,15 +83,14 @@ describe('mobile chatStorage', () => {
     expect(state.messages.map(m => m.seq)).toEqual([1, 2, 3]);
     expect(state.deletedIds.size).toBe(0);
 
-    await deleteLocalMessage('u1', 'conv1', 'cm2', 2);
-    state = await loadLocalConversationState('u1', 'conv1');
-    expect(state.messages.map(m => m.seq)).toEqual([1, 3]);
-    expect(state.deletedIds.has('cm2')).toBe(true);
-
     await clearLocalConversation('u1', 'conv1', 3);
     state = await loadLocalConversationState('u1', 'conv1');
     expect(state.messages).toEqual([]);
     expect(state.clearedUpToSeq).toBe(3);
+
+    await saveLocalMessages('u1', 'conv1', [m3, makeMsg('conv1', 'cm4', 4)]);
+    state = await loadLocalConversationState('u1', 'conv1');
+    expect(state.messages.map(m => m.seq)).toEqual([4]);
   });
 
   it('membersihkan seluruh chat lokal dan mereset database penuh tanpa menghapus keyring lain', async () => {

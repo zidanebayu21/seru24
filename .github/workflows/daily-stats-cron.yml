@@ -2,8 +2,8 @@ name: Daily Stats & DB Prune
 
 on:
   schedule:
-    # 01:00 UTC = 08:00 WIB setiap hari
-    - cron: '0 1 * * *'
+    # 01:00 UTC = 08:00 WIB setiap Senin dan Kamis
+    - cron: '0 1 * * 1,4'
   workflow_dispatch:
 
 jobs:
@@ -20,4 +20,7 @@ jobs:
             echo "::error::Secret CRON_SECRET belum diset di repo"
             exit 1
           fi
-          curl --fail-with-body -sS -H "Authorization: Bearer $CRON_SECRET" "$BASE_URL/api/cron/daily-stats"
+          # Repo publik: log Actions bisa dibaca siapa saja, jadi isi laporan tidak dicetak, hanya status HTTP.
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$BASE_URL/api/cron/daily-stats")
+          echo "HTTP $code"
+          [ "$code" = "200" ]

@@ -1,4 +1,4 @@
-import type { Conversation } from '#shared/chat-core'
+import { peerLabel, type Conversation } from '#shared/chat-core'
 import type { ChatMessage } from '#shared/e2ee-core'
 
 const CHAT_DB_NAME = 'seru24_chat_cache'
@@ -40,6 +40,14 @@ interface ClearedConvRecord {
   conversationId: string
   clearedUpToSeq: number
   clearedAt: number
+}
+
+export interface LocalConversationUsage {
+  conversationId: string
+  label: string
+  messages: number
+  bytes: number
+  maxSeq: number
 }
 
 export interface LocalChatStorageStats {
@@ -285,28 +293,35 @@ export const loadLocalConversationState = async (
   }).catch(() => empty)
 }
 
-/** Hapus satu pesan hanya di browser lokal (tombstone mencegah muncul lagi saat sinkronisasi). */
-export const deleteLocalMessage = async (
-  userId: string,
-  conversationId: string,
-  clientMsgId: string,
-  seq = 0,
-): Promise<void> => {
-  if (!isSupported() || !userId || !conversationId || !clientMsgId) return
-  await withDb(async (db) => {
-    const key = `${userId}:${conversationId}:${clientMsgId}`
-    const tx = db.transaction([STORES.messages, STORES.deletedMsgs], 'readwrite')
-    tx.objectStore(STORES.messages).delete(key)
-    tx.objectStore(STORES.deletedMsgs).put({
-      cacheKey: key,
-      userId,
-      conversationId,
-      clientMsgId,
-      seq,
-      deletedAt: Date.now(),
-    } satisfies DeletedMsgRecord)
-    await idbTxDone(tx)
-  })
+/** Pemakaian cache per percakapan: jumlah pesan, ukuran terenkripsi, dan seq terakhir untuk batas hapus. */
+export const getLocalConversationUsage = async (userId: string): Promise<LocalConversationUsage[]> => {
+  if (!isSupported() || !userId) return []
+  return withDb(async (db) => {
+    const tx = db.transaction([STORES.wrapKeys, STORES.conversations, STORES.messages], 'readonly')
+    const [wrapKey, convRecords, msgRecords] = await Promise.all([
+      idbReq<CryptoKey | undefined>(tx.objectStore(STORES.wrapKeys).get(userId)),
+      idbReq<EncryptedRecord[]>(tx.objectStore(STORES.conversations).index('by_user').getAll(userId)),
+      idbReq<EncryptedRecord[]>(tx.objectStore(STORES.messages).index('by_user').getAll(userId)),
+    ])
+
+    const usage = new Map<string, LocalConversationUsage>()
+    for (const r of msgRecords) {
+      const id = r.conversationId ?? ''
+      const item = usage.get(id) ?? { conversationId: id, label: '', messages: 0, bytes: 0, maxSeq: 0 }
+      item.messages += 1
+      item.bytes += r.data.byteLength
+      item.maxSeq = Math.max(item.maxSeq, r.seq ?? 0)
+      usage.set(id, item)
+    }
+    if (wrapKey) {
+      for (const r of convRecords) {
+        const item = usage.get(r.conversationId ?? '')
+        const conv = item ? await openJson<Conversation>(wrapKey, r.iv, r.data) : null
+        if (item && conv) item.label = peerLabel(conv)
+      }
+    }
+    return [...usage.values()].sort((a, b) => b.bytes - a.bytes)
+  }).catch(() => [])
 }
 
 /** Hapus seluruh riwayat satu percakapan di IndexedDB Chrome (pola waClear scaner_sca_sast). */

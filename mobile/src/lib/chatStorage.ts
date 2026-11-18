@@ -18,7 +18,6 @@ interface NativeChatStoreModule {
     userId: string,
     conversationId: string,
   ) => Promise<{ messages: string[]; deletedIds: string[]; clearedUpToSeq: number }>;
-  deleteMessage: (userId: string, conversationId: string, clientMsgId: string, seq: number) => Promise<void>;
   clearConversation: (userId: string, conversationId: string, upToSeq: number) => Promise<void>;
   clearAllChats: (userId: string) => Promise<void>;
   resetDatabase: () => Promise<void>;
@@ -212,30 +211,6 @@ export const loadLocalConversationState = async (
     .sort((a, b) => a.seq - b.seq);
 
   return { messages, deletedIds, clearedUpToSeq };
-};
-
-/** Hapus satu pesan hanya di perangkat ini (tombstone mencegah muncul lagi saat sinkronisasi). */
-export const deleteLocalMessage = async (
-  userId: string,
-  conversationId: string,
-  clientMsgId: string,
-  seq = 0,
-): Promise<void> => {
-  if (!userId || !conversationId || !clientMsgId) return;
-  if (native) {
-    await native.deleteMessage(userId, conversationId, clientMsgId, seq);
-    return;
-  }
-
-  const cacheKey = `${userId}:${conversationId}:${clientMsgId}`;
-  memoryMessages.get(userId)?.delete(cacheKey);
-  const convKey = `${userId}:${conversationId}`;
-  let deleted = memoryDeleted.get(convKey);
-  if (!deleted) {
-    deleted = new Set();
-    memoryDeleted.set(convKey, deleted);
-  }
-  deleted.add(clientMsgId);
 };
 
 /** Hapus seluruh riwayat satu percakapan di penyimpanan lokal HP. */
