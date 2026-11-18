@@ -52,6 +52,8 @@ export interface E2eeDeps {
   getKeyring: () => SecretKeyring | null
   getMe: () => Me | null
   tofu: TofuStore
+  /** Opsional: simpan kunci publik lawan di perangkat agar pesan tetap terbaca/terkirim saat offline. */
+  publicKeyCache?: TofuStore
 }
 
 export const createE2ee = (deps: E2eeDeps) => {
@@ -66,7 +68,16 @@ export const createE2ee = (deps: E2eeDeps) => {
 
   const fetchPublicKeys = async (userId: string, force = false) => {
     if (force || !publicKeys.has(userId)) {
-      publicKeys.set(userId, await deps.rpc<PublicKeyRow[]>('seru24_get_public_keys', { p_user: userId }))
+      try {
+        const rows = await deps.rpc<PublicKeyRow[]>('seru24_get_public_keys', { p_user: userId })
+        publicKeys.set(userId, rows)
+        deps.publicKeyCache?.set(userId, JSON.stringify(rows)).catch(() => undefined)
+      } catch (error) {
+        // offline: pakai kunci publik yang pernah disimpan (kunci publik, bukan rahasia)
+        const cached = await deps.publicKeyCache?.get(userId).catch(() => null)
+        if (!cached) throw error
+        publicKeys.set(userId, JSON.parse(cached) as PublicKeyRow[])
+      }
     }
     return publicKeys.get(userId)!
   }

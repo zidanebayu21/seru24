@@ -24,7 +24,9 @@ import {
   loadLocalConversationState,
   saveLocalMessages,
 } from '../lib/chatStorage';
-import { account, deleteRemoteFile, e2ee, inbox, openConversationPresence, rpc, whenAccountReady } from '../lib/core';
+import { account, deleteRemoteFile, e2ee, inbox, isOnline, openConversationPresence, rpc, whenAccountReady } from '../lib/core';
+import { isNetworkError } from '../../../web/shared/session-core';
+import { onQueuedSent, queueMessage, queuedFor, type QueuedMessage } from '../lib/outbox';
 import type { PeerPresence } from '../../../web/shared/presence-core';
 import { downloadFile, findSavedFile, openSavedFile, pickFiles, uploadFile, type PickedFile } from '../lib/files';
 import { notifyMessageSent } from '../lib/notify';
@@ -54,6 +56,26 @@ interface Bubble {
 type SendParams = Awaited<ReturnType<typeof e2ee.encryptText>> & { p_attachment_id?: string; p_reply_to?: string | null };
 
 const SAVED_NOTE = 'Tersimpan di Download/seru24';
+const QUEUED_NOTE = 'Menunggu sinyal, terkirim otomatis saat online';
+
+/** Pesan antrean dalam bentuk ChatMessage agar bisa didekripsi dan ditampilkan seperti pesan lain. */
+const queuedAsMessage = (item: QueuedMessage, myId: string | null): ChatMessage => ({
+  id: item.params.p_client_msg_id,
+  conversation_id: item.conversationId,
+  sender_id: myId,
+  seq: 0,
+  client_msg_id: item.params.p_client_msg_id,
+  kind: item.params.p_kind as ChatMessage['kind'],
+  ciphertext: item.params.p_ciphertext,
+  nonce: item.params.p_nonce,
+  sender_key_version: item.params.p_sender_key_version,
+  recipient_key_version: item.params.p_recipient_key_version,
+  reply_to: item.params.p_reply_to ?? null,
+  created_at: item.queuedAt,
+  edited_at: null,
+  deleted_at: null,
+  expires_at: null,
+});
 
 const percent = (done: number, total: number) => `${Math.round((done / Math.max(total, 1)) * 100)}%`;
 
@@ -143,14 +165,18 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         const ready = await whenAccountReady();
         if (!alive) return;
         setPreparing(false);
-        if (ready !== 'ready') return;
-        presenceRef.current = openConversationPresence(conversation.id, setPeerPresence);
-        // centang dua tetap benar setelah chat dibuka ulang
-        rpc<number>('seru24_peer_read_seq', { p_conversation_id: conversation.id })
-          .then(seq => setPeerReadSeq(prev => Math.max(prev, Number(seq) || 0)))
-          .catch(() => undefined);
+        if (ready !== 'ready' && ready !== 'offline') return;
+        if (ready === 'ready') {
+          presenceRef.current = openConversationPresence(conversation.id, setPeerPresence);
+          // centang dua tetap benar setelah chat dibuka ulang
+          rpc<number>('seru24_peer_read_seq', { p_conversation_id: conversation.id })
+            .then(seq => setPeerReadSeq(prev => Math.max(prev, Number(seq) || 0)))
+            .catch(() => undefined);
+        }
 
-        setKeyStatus(await e2ee.checkPeerKey(peerId));
+        // offline: kunci publik lawan dari cache HP
+        setKeyStatus(await e2ee.checkPeerKey(peerId).catch(() => ({ status: 'missing' as const })));
+        await showQueued();
 
         if (allMessagesRef.current.length > 0) {
           const initialSlice = sliceMessagesPage(allMessagesRef.current, null, CHAT_PAGE_SIZE);
@@ -227,6 +253,12 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     };
   }, [conversation.id, peerId, toBubble, markRead, updateBubbles]);
 
+  useEffect(() => onQueuedSent((item, result) => {
+    if (item.conversationId !== conversation.id) return;
+    if (result.ok) markDelivered(item.params, result, false);
+    else updateBubble(item.params.p_client_msg_id, { pending: false, progress: '', failed: SEND_ERRORS[result.code ?? ''] ?? 'Pesan gagal dikirim' });
+  }));
+
   const loadOlder = useCallback(async () => {
     if (!hasOlderRef.current || loadingOlderRef.current) return;
     const beforeSeq = oldestPersistedSeq(bubblesRef.current);
@@ -273,11 +305,20 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
   const updateBubble = (key: string, patch: Partial<Bubble>) =>
     updateBubbles(list => mergePagedBubbles([], list.map(b => (b.key === key ? { ...b, ...patch } : b))));
 
-  const deliver = async (build: (retry: boolean) => Promise<SendParams>, localKey: string, retry = false): Promise<void> => {
-    const params = await build(retry);
-    updateBubble(localKey, { key: params.p_client_msg_id });
-    const result = await rpc<SendResult>('seru24_send_message', params);
-    if (result.ok) {
+  /** Pesan antrean offline (sudah terenkripsi) yang belum terkirim ditampilkan lagi sebagai gelembung "mengirim". */
+  const showQueued = async () => {
+    const items = await queuedFor(conversation.id);
+    if (items.length === 0) return;
+    const myId = account.me?.id ?? null;
+    const pending = await Promise.all(items.map(async item => ({
+      ...(await toBubble(queuedAsMessage(item, myId))),
+      pending: true,
+      progress: QUEUED_NOTE,
+    })));
+    updateBubbles(list => [...list.filter(b => !pending.some(p => p.key === b.key)), ...pending]);
+  };
+
+  const markDelivered = (params: SendParams | QueuedMessage['params'], result: SendResult, notify: boolean) => {
       const createdAt = result.created_at ?? new Date().toISOString();
       const seq = result.seq ?? 0;
       const myId = account.me?.id ?? '';
@@ -287,7 +328,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         sender_id: myId || null,
         seq,
         client_msg_id: params.p_client_msg_id,
-        kind: params.p_kind,
+        kind: params.p_kind as ChatMessage['kind'],
         ciphertext: params.p_ciphertext,
         nonce: params.p_nonce,
         sender_key_version: params.p_sender_key_version,
@@ -305,10 +346,30 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         clearedUpToSeqRef.current,
       );
       if (myId) saveLocalMessages(myId, conversation.id, [cachedMsg]).catch(() => undefined);
-      updateBubble(params.p_client_msg_id, { id: result.id ?? null, seq, createdAt, pending: false });
-      if (result.id && result.code !== 'duplicate') {
+      updateBubble(params.p_client_msg_id, { id: result.id ?? null, seq, createdAt, pending: false, progress: '' });
+      if (notify && result.id && result.code !== 'duplicate') {
         notifyMessageSent(conversation.id, result.id);
       }
+  };
+
+  const deliver = async (build: (retry: boolean) => Promise<SendParams>, localKey: string, retry = false): Promise<void> => {
+    const params = await build(retry);
+    updateBubble(localKey, { key: params.p_client_msg_id });
+    let result: SendResult;
+    try {
+      if (!isOnline()) throw new TypeError('offline');
+      result = await rpc<SendResult>('seru24_send_message', params);
+    } catch (error) {
+      // sinyal hilang: pesan teks (sudah terenkripsi) masuk antrean dan dikirim otomatis saat online
+      if (params.p_kind === 'text' && (isNetworkError(error) || !isOnline())) {
+        await queueMessage({ conversationId: conversation.id, params, queuedAt: new Date().toISOString() });
+        updateBubble(params.p_client_msg_id, { progress: QUEUED_NOTE });
+        return;
+      }
+      throw error;
+    }
+    if (result.ok) {
+      markDelivered(params, result, true);
       return;
     }
     if (result.code === 'stale_key' && !retry) {
@@ -360,7 +421,10 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         return params;
       }), key);
     } catch (e) {
-      updateBubble(key, { pending: false, progress: '', failed: e instanceof Error && e.message ? e.message : 'Dokumen gagal dikirim' });
+      const failed = !isOnline() || isNetworkError(e)
+        ? 'Butuh koneksi untuk mengirim dokumen'
+        : e instanceof Error && e.message ? e.message : 'Dokumen gagal dikirim';
+      updateBubble(key, { pending: false, progress: '', failed });
     }
     // pesan gagal terkirim: jangan tinggalkan file yatim di Drive
     const sent = bubblesRef.current.find(b => b.key === key);

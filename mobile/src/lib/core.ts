@@ -5,7 +5,7 @@ import * as Keychain from 'react-native-keychain';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { fromBase64, toBase64, type SecretKeyring } from '../../../web/shared/crypto';
 import { SecureFetchError, createSecureFetch } from '../../../web/shared/secure-fetch-core';
-import { createSessionCore } from '../../../web/shared/session-core';
+import { createSessionCore, isNetworkError } from '../../../web/shared/session-core';
 import { createAccountCore, type AccountState, type AccountStatus, type Me } from '../../../web/shared/account-core';
 import { createE2ee } from '../../../web/shared/e2ee-core';
 import { createInbox } from '../../../web/shared/inbox-core';
@@ -142,7 +142,30 @@ export const e2ee = createE2ee({
     get: readSecure,
     set: writeSecure,
   },
+  // kunci publik lawan disimpan di HP agar chat tetap terbaca & pesan bisa diantrekan saat offline
+  publicKeyCache: {
+    get: userId => readSecure(`seru24.pubkeys.${userId}`),
+    set: (userId, value) => writeSecure(`seru24.pubkeys.${userId}`, value),
+  },
 });
+
+// ---- Status koneksi (offline = sesi belum bisa dipulihkan karena jaringan; data dari cache) ----
+
+let online = true;
+const onlineListeners = new Set<(value: boolean) => void>();
+
+export const isOnline = () => online;
+const setOnline = (value: boolean) => {
+  if (online === value) return;
+  online = value;
+  for (const listener of onlineListeners) listener(value);
+};
+export const onOnlineChange = (listener: (value: boolean) => void) => {
+  onlineListeners.add(listener);
+  return () => {
+    onlineListeners.delete(listener);
+  };
+};
 
 export const inbox = createInbox(getSupabase, () => account.me?.id);
 
@@ -163,7 +186,10 @@ export const deleteRemoteFile = async (id: string) => {
 // Profil terakhir yang berhasil masuk (id, username, nama; bukan rahasia) agar daftar chat dari cache lokal
 // bisa langsung tampil saat aplikasi dibuka, sementara sesi dipulihkan di belakang.
 const LAST_ME_SERVICE = 'seru24.last_me';
-let accountReady: Promise<AccountStatus> | null = null;
+
+/** offline = belum bisa menghubungi server; cache chat dan kunci di HP tetap bisa dipakai. */
+export type RestoreStatus = AccountStatus | 'offline';
+let accountReady: Promise<RestoreStatus> | null = null;
 
 const rememberAccount = () =>
   account.me ? writeSecure(LAST_ME_SERVICE, JSON.stringify(account.me)).catch(() => undefined) : undefined;
@@ -183,36 +209,53 @@ export const loadCachedAccount = async (): Promise<boolean> => {
   }
 };
 
-const restoreSessionNow = async (): Promise<AccountStatus> => {
+/** Jaringan gagal: tetap masuk dengan profil + kunci di HP (tidak logout); sesi dicoba lagi nanti. */
+const goOffline = async (): Promise<RestoreStatus> => {
+  const me = account.me;
+  if (me && (await accountApi.loadOfflineKeys(me))) {
+    setOnline(false);
+    return 'offline';
+  }
+  return 'unknown';
+};
+
+const restoreSessionNow = async (): Promise<RestoreStatus> => {
   await Promise.all([ensureVisitorKey(), installNativeScrypt()]);
   if (!(await session.getAccessToken())) {
+    if (session.wasOffline()) return goOffline();
     await forgetCachedAccount();
     return 'unknown';
   }
   try {
     const status = await accountApi.bootstrapAccount(false, account.me?.id);
     if (status !== 'ready') await signOut();
-    else await rememberAccount();
+    else {
+      await rememberAccount();
+      setOnline(true);
+    }
     return status;
-  } catch {
+  } catch (error) {
+    // hanya penolakan dari server yang membuat logout; sinyal hilang tidak
+    if (isNetworkError(error)) return goOffline();
     await signOut();
     return 'unknown';
   }
 };
 
 /** Saat aplikasi dibuka: pulihkan sesi (cookie refresh) dan kunci chat dari Keystore. */
-export const restoreSession = (): Promise<AccountStatus> => {
+export const restoreSession = (): Promise<RestoreStatus> => {
   accountReady = restoreSessionNow();
   return accountReady;
 };
 
 /** Tunggu sesi dan kunci chat siap (layar chat memakainya sebelum mendekripsi pesan). */
-export const whenAccountReady = (): Promise<AccountStatus> => accountReady ?? Promise.resolve(account.status);
+export const whenAccountReady = (): Promise<RestoreStatus> => accountReady ?? Promise.resolve(account.status);
 
 /** Setelah login/daftar: kunci chat dibuat atau dipulihkan dengan wrap_key dari password. */
 export const finishSignIn = async () => {
   if ((await accountApi.bootstrapAccount(true)) !== 'ready') throw new Error('Kunci chat tidak bisa dibuka');
   accountReady = Promise.resolve('ready');
+  setOnline(true);
   await rememberAccount();
 };
 
@@ -220,6 +263,14 @@ const signOutCleanups = new Set<() => Promise<void>>();
 export const onBeforeSignOut = (fn: () => Promise<void>) => {
   signOutCleanups.add(fn);
   return () => signOutCleanups.delete(fn);
+};
+
+/** Hemat daya: koneksi realtime diputus saat app di latar belakang (notifikasi lewat FCM) dan disambung lagi saat dibuka. */
+export const setRealtimeActive = (active: boolean) => {
+  if (!account.me) return;
+  const realtime = getSupabase().realtime;
+  if (active) realtime.connect();
+  else realtime.disconnect().catch(() => undefined);
 };
 
 export const signOut = async () => {

@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, StatusBar, View } from 'react-native';
+import { ActivityIndicator, AppState, StatusBar, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import type { Conversation } from '../../web/shared/chat-core';
-import { loadCachedAccount, restoreSession } from './lib/core';
+import { loadCachedAccount, restoreSession, setRealtimeActive, type RestoreStatus } from './lib/core';
+import { flushOutbox } from './lib/outbox';
 import { loadNotifySetting, startNotifications, stopNotifications, updateNotificationPresence } from './lib/notify';
 import { AuthScreen } from './screens/AuthScreen';
 import { ChatListScreen } from './screens/ChatListScreen';
@@ -12,23 +13,50 @@ import { colors, ui } from './theme';
 // boot = membaca profil tersimpan (sekejap, layar kosong); loading = belum pernah masuk di perangkat ini
 type Screen = { name: 'boot' } | { name: 'loading' } | { name: 'auth' } | { name: 'list' } | { name: 'chat'; conversation: Conversation };
 
+const RETRY_MS = 15_000;
+
 const App = () => {
   const [screen, setScreen] = useState<Screen>({ name: 'boot' });
   const activeConversation = useRef<string | null>(null);
   const signedIn = screen.name === 'list' || screen.name === 'chat';
 
   // Daftar chat dari cache lokal tampil seketika; sesi dan kunci dipulihkan di belakang.
+  // 'offline' = sinyal belum ada: tetap di daftar (cache), dicoba lagi berkala dan saat app dibuka kembali.
   useEffect(() => {
+    let cancelled = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+
+    const settle = (status: RestoreStatus) => {
+      if (cancelled) return;
+      if (status === 'offline') {
+        setScreen(current => (current.name === 'loading' || current.name === 'boot' ? { name: 'auth' } : current));
+        retry = setTimeout(() => restoreSession().then(settle).catch(() => undefined), RETRY_MS);
+        return;
+      }
+      setScreen(current => {
+        if (status !== 'ready') return { name: 'auth' };
+        return current.name === 'loading' || current.name === 'boot' ? { name: 'list' } : current;
+      });
+      if (status === 'ready') flushOutbox().catch(() => undefined);
+    };
+
     loadCachedAccount()
       .then(cached => {
         setScreen(cached ? { name: 'list' } : { name: 'loading' });
         return restoreSession();
       })
-      .then(status => setScreen(current => {
-        if (status !== 'ready') return { name: 'auth' };
-        return current.name === 'loading' || current.name === 'boot' ? { name: 'list' } : current;
-      }))
+      .then(settle)
       .catch(() => setScreen({ name: 'auth' }));
+
+    const sub = AppState.addEventListener('change', state => {
+      setRealtimeActive(state === 'active');
+      if (state === 'active') flushOutbox().catch(() => undefined);
+    });
+    return () => {
+      cancelled = true;
+      clearTimeout(retry);
+      sub.remove();
+    };
   }, []);
 
   useEffect(() => {

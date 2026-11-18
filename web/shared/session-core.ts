@@ -3,6 +3,7 @@
 // Password tidak pernah dikirim: dari password diturunkan auth_secret (ke server) dan wrap_key (tetap di klien).
 
 import { derivePasswordSecrets, newAuthSalt } from './crypto'
+import { SecureFetchError } from './secure-fetch-core'
 
 export interface SessionResponse {
   access_token: string
@@ -25,10 +26,19 @@ export type KeyMaterialSink = (wrapKey: Uint8Array, salt: string) => void
 
 const REFRESH_MARGIN_MS = 30_000
 
+/** Gagal karena jaringan/server (bukan sesi ditolak): sinyal hilang, timeout, atau server 5xx. */
+export const isNetworkError = (error: unknown): boolean => {
+  if (error instanceof SecureFetchError) return error.statusCode >= 500 || error.statusCode === 0
+  const message = String((error as { message?: unknown } | null)?.message ?? error ?? '')
+  return error instanceof TypeError || /network|failed to fetch|timeout|abort/i.test(message)
+}
+
 export const createSessionCore = (post: SecurePost, onKeyMaterial: KeyMaterialSink) => {
   let accessToken: string | null = null
   let expiresAtMs = 0
   let refreshing: Promise<boolean> | null = null
+  // true bila refresh terakhir gagal karena jaringan (sesi mungkin masih sah; coba lagi saat online)
+  let lastRefreshOffline = false
 
   const applySession = (session: SessionResponse) => {
     accessToken = session.access_token
@@ -44,9 +54,11 @@ export const createSessionCore = (post: SecurePost, onKeyMaterial: KeyMaterialSi
     refreshing ??= post<SessionResponse>('/api/auth/refresh')
       .then((session) => {
         applySession(session)
+        lastRefreshOffline = false
         return true
       })
-      .catch(() => {
+      .catch((error) => {
+        lastRefreshOffline = isNetworkError(error)
         clearLocalSession()
         return false
       })
@@ -99,5 +111,13 @@ export const createSessionCore = (post: SecurePost, onKeyMaterial: KeyMaterialSi
     await post('/api/auth/logout', token ? { access_token: token } : {}).catch(() => undefined)
   }
 
-  return { clearLocalSession, refreshSession, getAccessToken, loginWithPassword, registerAccount, logoutSession }
+  return {
+    clearLocalSession,
+    refreshSession,
+    getAccessToken,
+    loginWithPassword,
+    registerAccount,
+    logoutSession,
+    wasOffline: () => lastRefreshOffline,
+  }
 }

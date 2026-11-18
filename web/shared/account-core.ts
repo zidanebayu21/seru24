@@ -131,5 +131,17 @@ export const createAccountCore = (deps: AccountDeps, state: AccountState) => {
     if (userId) await deps.keyStore.remove(userId).catch(() => undefined)
   }
 
-  return { getKeyring: () => keyring, setPendingKeyMaterial, bootstrapAccount, resetAccount }
+  /**
+   * Mode offline: profil terakhir + kunci chat dari penyimpanan perangkat, tanpa server. Status tetap 'unknown'
+   * (sesi belum pulih); cukup untuk membaca cache dan menyiapkan pesan antrean.
+   */
+  const loadOfflineKeys = async (me: Me): Promise<boolean> => {
+    const ring = me.has_keys ? await deps.keyStore.load(me.id).catch(() => null) : null
+    if (!ring || !ring[String(me.key_version)]) return false
+    keyring = ring
+    state.me = me
+    return true
+  }
+
+  return { getKeyring: () => keyring, setPendingKeyMaterial, bootstrapAccount, resetAccount, loadOfflineKeys }
 }
