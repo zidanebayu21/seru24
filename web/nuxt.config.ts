@@ -12,6 +12,8 @@
         { name: 'viewport', content: 'width=device-width, initial-scale=1' },
         { name: 'description', content: 'seru24 — chat terenkripsi end-to-end' },
       ],
+      // ikon seru24 (konsep B2: gelembung chat + "24"), sama dengan ikon aplikasi Android
+      link: [{ rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],
     },
   },
 

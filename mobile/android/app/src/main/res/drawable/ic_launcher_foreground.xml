@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Gelembung chat bergaris + monogram "24" (outline Arial Black), diperkecil ke area aman ikon adaptif (66dp). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:pivotX="54"
+        android:pivotY="56"
+        android:scaleX="0.66"
+        android:scaleY="0.66">
+        <path
+            android:pathData="M30,22h48a14,14 0,0 1,14 14v30a14,14 0,0 1,-14 14H46l-14,11v-11h-2a14,14 0,0 1,-14 -14V36a14,14 0,0 1,14 -14z"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="5"
+            android:strokeLineJoin="round" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M53.14,64.00L34.64,64.00Q34.96,61.26 36.57,58.85Q38.18,56.43 42.62,53.15Q45.33,51.13 46.08,50.09Q46.84,49.04 46.84,48.11Q46.84,47.09 46.09,46.37Q45.34,45.65 44.21,45.65Q43.03,45.65 42.28,46.40Q41.53,47.14 41.27,49.01L35.09,48.52Q35.46,45.91 36.43,44.45Q37.40,42.99 39.16,42.21Q40.92,41.43 44.04,41.43Q47.29,41.43 49.10,42.17Q50.91,42.91 51.95,44.45Q52.99,45.99 52.99,47.89Q52.99,49.92 51.80,51.77Q50.61,53.62 47.48,55.83Q45.61,57.11 44.99,57.63Q44.36,58.14 43.51,58.97L53.14,58.97L53.14,64.00ZM65.37,59.85L54.14,59.85L54.14,54.78L65.37,41.43L70.74,41.43L70.74,55.07L73.53,55.07L73.53,59.85L70.74,59.85L70.74,64.00L65.37,64.00L65.37,59.85ZM65.37,55.07L65.37,48.09L59.43,55.07L65.37,55.07Z" />
+    </group>
+</vector>
