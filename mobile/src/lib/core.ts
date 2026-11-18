@@ -40,6 +40,7 @@ const decodeKeyring = (raw: string): SecretKeyring =>
 // ---- Penanda perangkat (header x-visitor-key; server hanya menyimpan hash-nya) ----
 
 let visitorKey = '';
+let visitorReady: Promise<void> | null = null;
 
 const loadVisitorKey = async () => {
   const stored = await readSecure(VISITOR_SERVICE);
@@ -51,6 +52,18 @@ const loadVisitorKey = async () => {
   crypto.getRandomValues(bytes);
   visitorKey = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
   await writeSecure(VISITOR_SERVICE, visitorKey);
+};
+
+/**
+ * Kunci perangkat dibaca sekali dari Keystore; semua RPC menunggu ini selesai. Tanpa ini, daftar chat dari cache
+ * (yang tampil sebelum sesi pulih) bisa memanggil server dengan header kosong lalu dianggap gagal dan logout.
+ */
+const ensureVisitorKey = () => {
+  visitorReady ??= loadVisitorKey().catch(error => {
+    visitorReady = null;
+    throw error;
+  });
+  return visitorReady;
 };
 
 // ---- HTTP ke server Nuxt (payload terenkripsi transport) ----
@@ -83,12 +96,20 @@ let supabase: SupabaseClient | null = null;
 const getSupabase = () => {
   supabase ??= createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     accessToken: session.getAccessToken,
-    global: { headers: { 'x-visitor-key': visitorKey } },
+    // header dibaca saat setiap request dikirim (bukan saat klien dibuat), jadi selalu berisi kunci terbaru
+    global: {
+      fetch: (input, init) => {
+        const headers = new Headers(init?.headers);
+        if (visitorKey) headers.set('x-visitor-key', visitorKey);
+        return fetch(input, { ...init, headers });
+      },
+    },
   });
   return supabase;
 };
 
 export const rpc = async <T = unknown>(fn: string, args?: Record<string, unknown>): Promise<T> => {
+  await ensureVisitorKey();
   const { data, error } = await getSupabase().rpc(fn, args);
   if (error) throw error;
   return data as T;
@@ -163,7 +184,7 @@ export const loadCachedAccount = async (): Promise<boolean> => {
 };
 
 const restoreSessionNow = async (): Promise<AccountStatus> => {
-  await Promise.all([loadVisitorKey(), installNativeScrypt()]);
+  await Promise.all([ensureVisitorKey(), installNativeScrypt()]);
   if (!(await session.getAccessToken())) {
     await forgetCachedAccount();
     return 'unknown';
