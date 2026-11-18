@@ -25,6 +25,7 @@ import {
 import { account, e2ee, inbox, rpc } from '../lib/core';
 import { notifyMessageSent } from '../lib/notify';
 import { Button } from '../components/Button';
+import { MenuItem, PopupMenu } from '../components/PopupMenu';
 import { colors, ui } from '../theme';
 
 interface Bubble {
@@ -52,6 +53,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
   const [peerReadSeq, setPeerReadSeq] = useState(0);
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
+  const [menuOpen, setMenuOpen] = useState(false);
   const listRef = useRef<FlatList<Bubble>>(null);
   const bubblesRef = useRef<Bubble[]>([]);
   const allMessagesRef = useRef<ChatMessage[]>([]);
@@ -334,6 +336,11 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     updateBubbles(() => []);
   };
 
+  const closeMenuThen = (action: () => Promise<void>) => {
+    setMenuOpen(false);
+    action().catch(() => undefined);
+  };
+
   const statusOf = (b: Bubble) => {
     if (b.pending) return 'mengirim…';
     if (b.failed) return b.failed;
@@ -353,13 +360,23 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
           <Text numberOfLines={1} style={{ fontWeight: '700', color: colors.text }}>{peerLabel(conversation)}</Text>
           <Text style={ui.muted}>@{conversation.peer_username} · terenkripsi end-to-end</Text>
         </View>
-        <Pressable onPress={clearChatLocally} style={{ padding: 8 }}>
-          <Text style={{ color: colors.danger }}>Hapus chat</Text>
-        </Pressable>
-        <Pressable onPress={toggleBlock} style={{ padding: 8 }}>
-          <Text style={{ color: colors.danger }}>{conversation.peer_blocked ? 'Buka blokir' : 'Blokir'}</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Menu percakapan"
+          onPress={() => setMenuOpen(true)}
+          hitSlop={8}
+          style={{ paddingHorizontal: 12, paddingVertical: 8 }}>
+          <Text style={{ fontSize: 22, lineHeight: 22, color: colors.text }}>⋮</Text>
         </Pressable>
       </View>
+      <PopupMenu open={menuOpen} onClose={() => setMenuOpen(false)}>
+        <MenuItem label="Hapus riwayat chat di HP ini" onPress={() => closeMenuThen(clearChatLocally)} />
+        <MenuItem
+          label={conversation.peer_blocked ? 'Buka blokir' : 'Blokir'}
+          danger={!conversation.peer_blocked}
+          onPress={() => closeMenuThen(toggleBlock)}
+        />
+      </PopupMenu>
 
       <View style={{ paddingHorizontal: 16, gap: 8 }}>
         {keyStatus.status === 'changed' ? (
@@ -411,8 +428,12 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
             <View style={[ui.row, { justifyContent: 'flex-end', gap: 10 }]}>
               <Text style={[ui.muted, { fontSize: 11 }]}>{statusOf(item)}</Text>
               {item.mine && item.id && !item.deleted ? (
-                <Pressable onPress={() => removeMessage(item)}>
-                  <Text style={[ui.muted, { fontSize: 11, textDecorationLine: 'underline' }]}>Hapus</Text>
+                <Pressable
+                  onPress={() => removeMessage(item)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Hapus pesan"
+                  hitSlop={8}>
+                  <Text style={[ui.muted, { fontSize: 14, lineHeight: 14 }]}>✕</Text>
                 </Pressable>
               ) : null}
             </View>

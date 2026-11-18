@@ -388,7 +388,14 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
         <p v-else class="text">{{ b.text }}</p>
         <div class="foot row">
           <span class="muted">{{ status(b) }}</span>
-          <button v-if="b.mine && b.id && !b.deleted" type="button" class="link" @click="removeMessage(b)">Hapus</button>
+          <button
+            v-if="b.mine && b.id && !b.deleted"
+            type="button"
+            class="icon-del"
+            aria-label="Hapus pesan"
+            title="Hapus pesan"
+            @click="removeMessage(b)"
+          >&times;</button>
         </div>
       </div>
     </div>
@@ -450,6 +457,7 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
 .text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .foot { justify-content: flex-end; gap: 8px; }
 .foot .muted { font-size: 11px; }
-.link { padding: 0; border: 0; background: none; color: var(--muted); font-size: 11px; text-decoration: underline; }
+.icon-del { padding: 0 2px; border: 0; background: none; color: var(--muted); font-size: 15px; line-height: 1; cursor: pointer; }
+.icon-del:hover { color: var(--danger); }
 .composer textarea { flex: 1; resize: none; max-height: 140px; }
 </style>

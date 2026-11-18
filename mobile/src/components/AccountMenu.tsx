@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Linking, Modal, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import {
   clearAllLocalChats,
   getLocalChatStorageStats,
@@ -9,6 +9,7 @@ import {
 import { account, signOut, webUrl } from '../lib/core';
 import { disableNotifications, enableNotifications, isNotifyEnabled, notifySupported } from '../lib/notify';
 import { colors, ui } from '../theme';
+import { MenuItem, menuStyles, PopupMenu } from './PopupMenu';
 
 interface Props {
   onSignedOut: () => void;
@@ -116,55 +117,42 @@ export const AccountMenu = ({ onSignedOut }: Props) => {
         style={[styles.avatar, { backgroundColor: `hsl(${hueOf(me?.username ?? '')}, 55%, 42%)` }]}>
         <Text style={styles.initials}>{initialsOf(name)}</Text>
       </Pressable>
-      <Modal transparent visible={open} animationType="fade" onRequestClose={() => setOpen(false)}>
-        <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
-          <View style={styles.menu}>
-            <View style={styles.who}>
-              <Text style={{ fontWeight: '700', color: colors.text }}>{name}</Text>
-              <Text style={ui.muted}>@{me?.username}</Text>
-            </View>
-            <MenuItem label="Edit profil" onPress={() => openWeb('/akun/profil')} />
-            <MenuItem label="Ganti password" onPress={() => openWeb('/akun/password')} />
-            {notifySupported ? (
-              <View style={[styles.item, styles.toggle]}>
-                <Text style={{ color: colors.text }}>Notifikasi</Text>
-                <Switch value={notify} onValueChange={toggleNotify} trackColor={{ true: colors.accent }} />
-              </View>
-            ) : null}
-            {notifyHint ? <Text style={[ui.error, { fontSize: 12, paddingHorizontal: 10 }]}>{notifyHint}</Text> : null}
-            <View style={styles.storageBox}>
-              <Text style={[ui.muted, { fontSize: 12 }]}>
-                DB Lokal: {stats.conversations} chat · {stats.messages} pesan ({formatBytes(stats.sizeBytes)})
-              </Text>
-              {storageNote ? <Text style={[ui.muted, { fontSize: 12, color: colors.accent }]}>{storageNote}</Text> : null}
-            </View>
-            <MenuItem label="Bersihkan chat lokal" onPress={handleClearChats} />
-            <MenuItem
-              label={confirmReset ? 'Ketuk lagi: konfirmasi reset DB chat' : 'Reset penuh DB chat'}
-              danger
-              onPress={handleResetDb}
-            />
-            <MenuItem label="Keluar" danger onPress={logout} />
+      <PopupMenu open={open} onClose={() => setOpen(false)}>
+        <View style={styles.who}>
+          <Text style={{ fontWeight: '700', color: colors.text }}>{name}</Text>
+          <Text style={ui.muted}>@{me?.username}</Text>
+        </View>
+        <MenuItem label="Edit profil" onPress={() => openWeb('/akun/profil')} />
+        <MenuItem label="Ganti password" onPress={() => openWeb('/akun/password')} />
+        {notifySupported ? (
+          <View style={[menuStyles.item, styles.toggle]}>
+            <Text style={{ color: colors.text }}>Notifikasi</Text>
+            <Switch value={notify} onValueChange={toggleNotify} trackColor={{ true: colors.accent }} />
           </View>
-        </Pressable>
-      </Modal>
+        ) : null}
+        {notifyHint ? <Text style={[ui.error, { fontSize: 12, paddingHorizontal: 10 }]}>{notifyHint}</Text> : null}
+        <View style={styles.storageBox}>
+          <Text style={[ui.muted, { fontSize: 12 }]}>
+            DB Lokal: {stats.conversations} chat · {stats.messages} pesan ({formatBytes(stats.sizeBytes)})
+          </Text>
+          {storageNote ? <Text style={[ui.muted, { fontSize: 12, color: colors.accent }]}>{storageNote}</Text> : null}
+        </View>
+        <MenuItem label="Bersihkan chat lokal" onPress={handleClearChats} />
+        <MenuItem
+          label={confirmReset ? 'Ketuk lagi: konfirmasi reset DB chat' : 'Reset penuh DB chat'}
+          danger
+          onPress={handleResetDb}
+        />
+        <MenuItem label="Keluar" danger onPress={logout} />
+      </PopupMenu>
     </>
   );
 };
 
-const MenuItem = ({ label, onPress, danger }: { label: string; onPress: () => void; danger?: boolean }) => (
-  <Pressable accessibilityRole="menuitem" onPress={onPress} style={styles.item}>
-    <Text style={{ color: danger ? colors.danger : colors.text }}>{label}</Text>
-  </Pressable>
-);
-
 const styles = StyleSheet.create({
   avatar: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   initials: { color: '#fff', fontWeight: '700' },
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.15)', alignItems: 'flex-end', paddingTop: 64, paddingRight: 16 },
-  menu: { minWidth: 220, backgroundColor: colors.surface, borderRadius: 12, padding: 6, elevation: 6 },
   who: { padding: 10, borderBottomWidth: 1, borderBottomColor: colors.border, marginBottom: 4 },
   storageBox: { paddingHorizontal: 10, paddingVertical: 6, borderTopWidth: 1, borderTopColor: colors.border, marginTop: 4 },
-  item: { paddingVertical: 11, paddingHorizontal: 10, borderRadius: 8 },
   toggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 },
 });
