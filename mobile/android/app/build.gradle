@@ -92,8 +92,8 @@ android {
         applicationId "id.seru24.chat"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 17
-        versionName "1.17"
+        versionCode 19
+        versionName "1.19"
     }
     signingConfigs {
         debug {
@@ -145,6 +145,8 @@ dependencies {
     // FCM untuk notifikasi push saat aplikasi ditutup penuh
     implementation(platform("com.google.firebase:firebase-bom:33.10.0"))
     implementation("com.google.firebase:firebase-messaging")
+    // Mode Dekat: chat langsung antar HP tanpa internet (NearbyModule)
+    implementation("com.google.android.gms:play-services-nearby:19.3.0")
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")

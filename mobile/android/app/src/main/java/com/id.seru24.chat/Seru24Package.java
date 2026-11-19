@@ -14,7 +14,7 @@ public class Seru24Package implements ReactPackage {
     @Override
     public List<NativeModule> createNativeModules(ReactApplicationContext context) {
         return Arrays.asList(new ScryptModule(context), new NotifyModule(context), new ChatStoreModule(context), new UpdateModule(context),
-            new FileModule(context), new AudioModule(context));
+            new FileModule(context), new AudioModule(context), new NearbyModule(context));
     }
 
     @Override
