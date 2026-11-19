@@ -24,6 +24,8 @@ export interface SessionResponse {
   access_token: string
   expires_at: number
   user_id: string
+  /** Hanya untuk aplikasi Android (payload.native): disimpan di Keystore sebagai cadangan cookie. */
+  refresh_token?: string
 }
 
 export const authClient = (event: H3Event) => {
@@ -141,7 +143,13 @@ export const assertSameOrigin = (event: H3Event) => {
   }
 }
 
-export const issueSession = (event: H3Event, session: Session): SessionResponse => {
+/**
+ * Aplikasi native meminta refresh token di body (disimpan di Android Keystore, OWASP MASVS-STORAGE) karena cookie
+ * bisa hilang saat aplikasi diganti/ditutup paksa. Browser tidak pernah menerimanya: tetap cookie httpOnly (ASVS V3.4.2).
+ */
+export const wantsNativeToken = (payload: Record<string, unknown>) => payload.native === true
+
+export const issueSession = (event: H3Event, session: Session, native = false): SessionResponse => {
   setCookie(event, REFRESH_COOKIE, session.refresh_token, {
     httpOnly: true,
     secure: true,
@@ -153,10 +161,19 @@ export const issueSession = (event: H3Event, session: Session): SessionResponse 
     access_token: session.access_token,
     expires_at: session.expires_at ?? Math.floor(Date.now() / 1000) + session.expires_in,
     user_id: session.user.id,
+    ...(native ? { refresh_token: session.refresh_token } : {}),
   }
 }
 
-export const readRefreshToken = (event: H3Event) => getCookie(event, REFRESH_COOKIE)
+const REFRESH_TOKEN_PATTERN = /^[A-Za-z0-9_-]{8,512}$/
+
+/** Cookie dulu; bila tidak ada, token dari body hanya untuk klien native. */
+export const readRefreshToken = (event: H3Event, payload: Record<string, unknown> = {}) => {
+  const fromCookie = getCookie(event, REFRESH_COOKIE)
+  if (fromCookie) return fromCookie
+  const fromBody = payload.native === true ? payload.refresh_token : undefined
+  return typeof fromBody === 'string' && REFRESH_TOKEN_PATTERN.test(fromBody) ? fromBody : undefined
+}
 
 export const clearRefreshCookie = (event: H3Event) => deleteCookie(event, REFRESH_COOKIE, { path: '/', secure: true })
 

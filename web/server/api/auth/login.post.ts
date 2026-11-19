@@ -16,5 +16,5 @@ export default defineSecureHandler(async (event, payload) => {
   if (error || !data.session) throw invalidCredentials(error ?? undefined)
 
   await logAuthSuccess(event, 'login_success', data.session.user.id, 'Login berhasil')
-  return issueSession(event, data.session)
+  return issueSession(event, data.session, wantsNativeToken(payload))
 }, { rejectedEvent: 'login_failed', channel: 'auth' })

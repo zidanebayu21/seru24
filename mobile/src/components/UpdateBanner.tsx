@@ -36,7 +36,7 @@ export const UpdateBanner = () => {
           ? 'Izinkan "Instal aplikasi tak dikenal" untuk seru24, lalu ketuk Perbarui lagi.'
           : result === 'unsupported'
             ? 'Pembaruan langsung tidak didukung; unduh lewat link.'
-            : 'Ikuti layar instal untuk menyelesaikan pembaruan.',
+            : 'Sudah diunduh. Ikuti layar instal; bila tertunda peringatan Play Protect, ketuk Perbarui lagi (tanpa unduh ulang).',
       );
     } catch {
       setStatus('Pembaruan gagal. Coba lagi atau unduh lewat link.');

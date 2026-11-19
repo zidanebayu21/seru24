@@ -75,7 +75,7 @@ export default defineSecureHandler(async (event, payload) => {
     await logAuthSuccess(event, 'register_success', userId, `Pendaftaran berhasil (@${input.metadata.username})`)
   }
   if (session) {
-    return { status: 'active', ...issueSession(event, session) }
+    return { status: 'active', ...issueSession(event, session, wantsNativeToken(payload)) }
   }
   return { status: 'verify_email' }
 }, { rejectedEvent: 'register_rejected', channel: 'auth' })

@@ -6,6 +6,7 @@ interface NativeUpdateModule {
   canInstall: () => Promise<boolean>;
   openInstallSettings: () => Promise<void>;
   downloadAndInstall: (url: string, sha256: string) => Promise<void>;
+  cleanupUpdates: () => Promise<void>;
 }
 
 const native = NativeModules.Seru24Update as NativeUpdateModule | undefined;
@@ -16,7 +17,10 @@ export const checkForUpdate = async (): Promise<AppRelease | null> => {
     const res = await fetch(`${API_BASE_URL}/api/app/latest`);
     if (!res.ok) return null;
     const latest = parseAppRelease(((await res.json()) as { latest?: unknown }).latest);
-    return isNewerRelease(latest, APP_VERSION_CODE) ? latest : null;
+    if (isNewerRelease(latest, APP_VERSION_CODE)) return latest;
+    // sudah versi terbaru: APK hasil unduhan sebelumnya (yang dipertahankan untuk unduh ulang) sudah tidak diperlukan
+    await native?.cleanupUpdates().catch(() => undefined);
+    return null;
   } catch {
     return null;
   }

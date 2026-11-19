@@ -9,6 +9,17 @@ export interface SessionResponse {
   access_token: string
   expires_at: number
   user_id: string
+  refresh_token?: string
+}
+
+/**
+ * Cadangan refresh token untuk aplikasi native (Android Keystore). Cookie httpOnly bisa hilang saat aplikasi
+ * diperbarui atau ditutup paksa; tanpa cadangan ini pengguna ikut logout. Web tidak memakainya.
+ */
+export interface RefreshStore {
+  load: () => Promise<string | null>
+  save: (token: string) => Promise<void>
+  clear: () => Promise<void>
 }
 
 export interface RegisterInput {
@@ -33,16 +44,20 @@ export const isNetworkError = (error: unknown): boolean => {
   return error instanceof TypeError || /network|failed to fetch|timeout|abort/i.test(message)
 }
 
-export const createSessionCore = (post: SecurePost, onKeyMaterial: KeyMaterialSink) => {
+export const createSessionCore = (post: SecurePost, onKeyMaterial: KeyMaterialSink, refreshStore?: RefreshStore) => {
   let accessToken: string | null = null
   let expiresAtMs = 0
   let refreshing: Promise<boolean> | null = null
   // true bila refresh terakhir gagal karena jaringan (sesi mungkin masih sah; coba lagi saat online)
   let lastRefreshOffline = false
 
-  const applySession = (session: SessionResponse) => {
+  const nativeFlag = refreshStore ? { native: true } : {}
+
+  const applySession = async (session: SessionResponse) => {
     accessToken = session.access_token
     expiresAtMs = session.expires_at * 1000
+    // Supabase merotasi refresh token di setiap refresh: token baru harus tersimpan sebelum dipakai lagi
+    if (refreshStore && session.refresh_token) await refreshStore.save(session.refresh_token).catch(() => undefined)
   }
 
   const clearLocalSession = () => {
@@ -51,15 +66,20 @@ export const createSessionCore = (post: SecurePost, onKeyMaterial: KeyMaterialSi
   }
 
   const refreshSession = (): Promise<boolean> => {
-    refreshing ??= post<SessionResponse>('/api/auth/refresh')
-      .then((session) => {
-        applySession(session)
+    refreshing ??= (async () => {
+      const stored = refreshStore ? await refreshStore.load().catch(() => null) : null
+      return post<SessionResponse>('/api/auth/refresh', { ...nativeFlag, ...(stored ? { refresh_token: stored } : {}) })
+    })()
+      .then(async (session) => {
+        await applySession(session)
         lastRefreshOffline = false
         return true
       })
-      .catch((error) => {
+      .catch(async (error) => {
         lastRefreshOffline = isNetworkError(error)
         clearLocalSession()
+        // sesi ditolak server (bukan sinyal hilang): token tersimpan sudah tidak berlaku
+        if (!lastRefreshOffline) await refreshStore?.clear().catch(() => undefined)
         return false
       })
       .finally(() => {
@@ -78,7 +98,9 @@ export const createSessionCore = (post: SecurePost, onKeyMaterial: KeyMaterialSi
     const { salt } = await post<{ salt: string }>('/api/auth/prelogin', { identifier })
     const secrets = await derivePasswordSecrets(password, salt)
     try {
-      applySession(await post<SessionResponse>('/api/auth/login', { identifier, auth_secret: secrets.authSecret }))
+      await applySession(
+        await post<SessionResponse>('/api/auth/login', { identifier, auth_secret: secrets.authSecret, ...nativeFlag }),
+      )
       onKeyMaterial(secrets.wrapKey, salt)
     } catch (error) {
       secrets.wrapKey.fill(0)
@@ -95,9 +117,10 @@ export const createSessionCore = (post: SecurePost, onKeyMaterial: KeyMaterialSi
       display_name: input.display_name,
       auth_secret: secrets.authSecret,
       auth_salt: salt,
+      ...nativeFlag,
     })
     if (result.status === 'active') {
-      applySession(result as SessionResponse)
+      await applySession(result as SessionResponse)
       onKeyMaterial(secrets.wrapKey, salt)
     } else {
       secrets.wrapKey.fill(0)
@@ -108,6 +131,7 @@ export const createSessionCore = (post: SecurePost, onKeyMaterial: KeyMaterialSi
   const logoutSession = async () => {
     const token = accessToken
     clearLocalSession()
+    await refreshStore?.clear().catch(() => undefined)
     await post('/api/auth/logout', token ? { access_token: token } : {}).catch(() => undefined)
   }
 

@@ -1,5 +1,5 @@
-export default defineSecureHandler(async (event) => {
-  const refreshToken = readRefreshToken(event)
+export default defineSecureHandler(async (event, payload) => {
+  const refreshToken = readRefreshToken(event, payload)
   if (!refreshToken) {
     throw createError({ statusCode: 401, statusMessage: 'Sesi berakhir' })
   }
@@ -10,7 +10,7 @@ export default defineSecureHandler(async (event) => {
     clearRefreshCookie(event)
     throw createError({ statusCode: 401, statusMessage: 'Sesi berakhir' })
   }
-  return issueSession(event, data.session)
+  return issueSession(event, data.session, wantsNativeToken(payload))
 }, {
   // 401 tanpa cookie terjadi di setiap kunjungan pengguna yang belum login; tidak dicatat agar log tidak penuh
   rejectedEvent: false,

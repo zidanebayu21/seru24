@@ -32,6 +32,7 @@ import java.util.concurrent.Executors;
  */
 public class UpdateModule extends ReactContextBaseJavaModule {
     private static final String ALLOWED_HOST = "drive.usercontent.google.com";
+    private static final String APK_NAME = "seru24-update.apk";
     private static final String EVENT_PROGRESS = "seru24UpdateProgress";
     private static final long MAX_BYTES = 100L * 1024 * 1024;
     private static final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor();
@@ -73,13 +74,19 @@ public class UpdateModule extends ReactContextBaseJavaModule {
                 ReactApplicationContext ctx = getReactApplicationContext();
                 File dir = new File(ctx.getCacheDir(), "updates");
                 if (!dir.isDirectory() && !dir.mkdirs()) throw new IllegalStateException("Folder unduhan gagal dibuat");
-                apk = new File(dir, "seru24-update.apk");
+                apk = new File(dir, APK_NAME);
 
-                String actual = download(source, apk);
-                if (!actual.equals(sha256.toLowerCase(Locale.ROOT))) {
-                    apk.delete();
-                    promise.reject("hash_mismatch", "File pembaruan tidak cocok, unduhan dibatalkan");
-                    return;
+                // APK yang sudah diunduh dan hash-nya cocok dipakai ulang: layar instal bisa tertunda (peringatan
+                // Play Protect) dan pengguna tidak perlu mengunduh lagi. File hanya dihapus bila tidak cocok atau
+                // setelah versi baru terpasang (cleanupUpdates).
+                String expected = sha256.toLowerCase(Locale.ROOT);
+                if (!apk.isFile() || !expected.equals(hashOf(apk))) {
+                    String actual = download(source, apk);
+                    if (!actual.equals(expected)) {
+                        apk.delete();
+                        promise.reject("hash_mismatch", "File pembaruan tidak cocok, unduhan dibatalkan");
+                        return;
+                    }
                 }
 
                 Uri uri = FileProvider.getUriForFile(ctx, ctx.getPackageName() + ".updates", apk);
@@ -89,10 +96,38 @@ public class UpdateModule extends ReactContextBaseJavaModule {
                 ctx.startActivity(install);
                 promise.resolve(null);
             } catch (Exception e) {
+                // unduhan yang terputus meninggalkan file separuh; hapus agar tidak dipakai ulang
                 if (apk != null) apk.delete();
                 promise.reject("update_error", e);
             }
         });
+    }
+
+    /** Hapus APK pembaruan yang tersisa; dipanggil saat aplikasi sudah versi terbaru (pembaruan sudah terpasang). */
+    @ReactMethod
+    public void cleanupUpdates(Promise promise) {
+        File apk = new File(new File(getReactApplicationContext().getCacheDir(), "updates"), APK_NAME);
+        if (apk.isFile() && !apk.delete()) {
+            promise.reject("cleanup_error", "File pembaruan lama gagal dihapus");
+            return;
+        }
+        promise.resolve(null);
+    }
+
+    private String hashOf(File file) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        try (InputStream in = new java.io.FileInputStream(file)) {
+            byte[] buffer = new byte[64 * 1024];
+            int read;
+            while ((read = in.read(buffer)) != -1) digest.update(buffer, 0, read);
+        }
+        return toHex(digest.digest());
+    }
+
+    private static String toHex(byte[] bytes) {
+        StringBuilder hex = new StringBuilder();
+        for (byte b : bytes) hex.append(String.format(Locale.ROOT, "%02x", b));
+        return hex.toString();
     }
 
     /** Unduh ke file sambil menghitung SHA-256; mengembalikan hash hex. */
@@ -124,9 +159,7 @@ public class UpdateModule extends ReactContextBaseJavaModule {
                 }
             }
             emitProgress(done, total);
-            StringBuilder hex = new StringBuilder();
-            for (byte b : digest.digest()) hex.append(String.format(Locale.ROOT, "%02x", b));
-            return hex.toString();
+            return toHex(digest.digest());
         } finally {
             conn.disconnect();
         }

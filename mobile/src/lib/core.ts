@@ -90,7 +90,16 @@ export const secureFetch = createSecureFetch({
 export const account: AccountState = { me: null, status: 'unknown' };
 
 let accountCore: ReturnType<typeof createAccountCore> | null = null;
-export const session = createSessionCore(secureFetch, (wrapKey, salt) => accountCore?.setPendingKeyMaterial(wrapKey, salt));
+// Refresh token juga disimpan di Keystore: cookie bisa hilang saat aplikasi diperbarui atau ditutup paksa.
+const REFRESH_SERVICE = 'seru24.refresh';
+
+export const session = createSessionCore(secureFetch, (wrapKey, salt) => accountCore?.setPendingKeyMaterial(wrapKey, salt), {
+  load: () => readSecure(REFRESH_SERVICE),
+  save: token => writeSecure(REFRESH_SERVICE, token),
+  clear: async () => {
+    await removeSecure(REFRESH_SERVICE);
+  },
+});
 
 let supabase: SupabaseClient | null = null;
 const getSupabase = () => {
