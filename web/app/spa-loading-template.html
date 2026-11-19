@@ -1,0 +1,11 @@
+<div class="boot" role="status" aria-label="Memuat seru24">
+  <img src="/favicon.svg" alt="" width="48" height="48">
+  <span class="boot-ring" aria-hidden="true"></span>
+</div>
+<style>
+  .boot { position: fixed; inset: 0; display: grid; place-content: center; justify-items: center; gap: 18px; background: #f4f5f7; }
+  .boot-ring { width: 22px; height: 22px; border: 2.5px solid rgb(15 118 110 / 22%); border-top-color: #0f766e; border-radius: 50%; animation: boot-spin .8s linear infinite; }
+  @keyframes boot-spin { to { transform: rotate(360deg); } }
+  @media (prefers-color-scheme: dark) { .boot { background: #0f1215; } .boot-ring { border-color: rgb(45 212 191 / 22%); border-top-color: #2dd4bf; } }
+  @media (prefers-reduced-motion: reduce) { .boot-ring { animation-duration: 3s; } }
+</style>

@@ -2,6 +2,8 @@
   compatibilityDate: '2025-07-15',
   devtools: { enabled: false },
   modules: ['nuxt-security'],
+  // layar awal selama aplikasi (tanpa SSR) dan sesi dipulihkan; tanpa ini halaman kosong beberapa detik
+  spaLoadingTemplate: true,
   css: ['~/assets/main.css'],
 
   app: {

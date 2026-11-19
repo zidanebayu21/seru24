@@ -144,6 +144,8 @@ const fetchPage = (beforeSeq?: number) =>
 
 const load = async () => {
   const myId = account.me?.id ?? ''
+  // pesan terbaru diminta bersamaan dengan data percakapan (tidak saling menunggu); hasilnya dipakai di bawah
+  const firstPage = fetchPage().then((rows) => ({ rows }), (cause: unknown) => ({ cause }))
   let list: Conversation[] = []
   try {
     // satu percakapan saja: yang dibuka bisa ada di luar halaman daftar chat yang sudah dimuat
@@ -179,7 +181,9 @@ const load = async () => {
   }
 
   try {
-    const rows = await fetchPage()
+    const first = await firstPage
+    if ('cause' in first) throw first.cause
+    const rows = first.rows
     serverExhausted.value = rows.length < CHAT_PAGE_SIZE
     const merged = mergeCachedMessages(allMessages.value, rows, deletedIds.value, clearedUpToSeq.value)
     allMessages.value = merged
@@ -778,7 +782,18 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
       </button>
     </form>
   </main>
-  <p v-else-if="error" class="error" style="padding: 16px">{{ error }}</p>
+  <main v-else-if="!error" class="chat" aria-busy="true" aria-label="Memuat percakapan">
+    <header class="bar row">
+      <span class="sk sk-circle" />
+      <div class="who"><span class="sk sk-line" /></div>
+    </header>
+    <div class="messages">
+      <span class="sk sk-bubble" />
+      <span class="sk sk-bubble sk-mine" />
+      <span class="sk sk-bubble" />
+    </div>
+  </main>
+  <p v-else class="error" style="padding: 16px">{{ error }}</p>
 </template>
 
 <style scoped>
@@ -840,24 +855,33 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
 .text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .foot { width: 100%; justify-content: flex-end; gap: 6px; min-height: 18px; }
 .foot .muted { font-size: 11px; }
+/* tombol balas/hapus mengambang di samping gelembung (muncul saat disorot) agar tidak menggeser jam */
+.bubble { position: relative; }
 .icon-del, .icon-reply {
+  position: absolute;
+  top: 50%;
   display: grid;
   place-items: center;
-  width: 22px;
-  min-height: 22px;
-  height: 22px;
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  margin-top: -15px;
   padding: 0;
-  border: 0;
-  border-radius: 6px;
+  border: 0 solid transparent;
+  border-radius: 8px;
   background: none;
+  background-clip: padding-box;
   color: var(--muted);
   opacity: 0;
   transition: opacity .12s, color .12s, background-color .12s;
 }
+.bubble:not(.mine) .icon-reply { left: 100%; border-left-width: 6px; }
+.bubble.mine .icon-reply { right: 100%; border-right-width: 6px; }
+.bubble.mine .icon-del { right: calc(100% + 30px); }
 .bubble:hover .icon-del, .bubble:hover .icon-reply, .icon-del:focus-visible, .icon-reply:focus-visible { opacity: 1; }
 @media (hover: none) { .icon-del, .icon-reply { opacity: .7; } }
-.icon-del:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
-.icon-reply:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.icon-del:hover { color: var(--danger); background-color: color-mix(in srgb, var(--danger) 10%, transparent); }
+.icon-reply:hover { color: var(--accent); background-color: color-mix(in srgb, var(--accent) 12%, transparent); }
 .ticks { font-size: 12px; letter-spacing: -3px; color: var(--muted); margin-right: 2px; }
 .ticks.read { color: var(--accent); font-weight: 700; }
 .quote { display: flex; flex-direction: column; gap: 1px; padding: 4px 8px; margin-bottom: 4px; border-left: 3px solid var(--accent); border-radius: 6px; background: var(--quote-bg); font-size: 12px; overflow-wrap: anywhere; }
@@ -886,6 +910,13 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
 .voice-track { flex: 1; height: 4px; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, var(--text) 15%, transparent); }
 .voice-fill { height: 100%; background: var(--accent); }
 .voice-time { flex: none; min-width: 2.6em; text-align: right; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.sk { display: block; background: linear-gradient(90deg, color-mix(in srgb, var(--text) 7%, transparent) 25%, color-mix(in srgb, var(--text) 13%, transparent) 50%, color-mix(in srgb, var(--text) 7%, transparent) 75%); background-size: 200% 100%; animation: sk-shimmer 1.4s ease-in-out infinite; }
+.sk-circle { width: 40px; height: 40px; border-radius: 50%; }
+.sk-line { width: 9rem; height: 14px; border-radius: 7px; }
+.sk-bubble { width: 55%; height: 44px; border-radius: 16px 16px 16px 5px; }
+.sk-bubble.sk-mine { align-self: flex-end; width: 40%; border-radius: 16px 16px 5px 16px; }
+@keyframes sk-shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .sk { animation: none; } }
 .recording { align-items: center; gap: 10px; }
 .rec-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--danger); animation: rec-pulse 1.2s ease-in-out infinite; }
 .rec-time { font-variant-numeric: tabular-nums; font-weight: 600; }
