@@ -28,20 +28,27 @@ export interface NearbyEvent {
   value: string;
 }
 
-/** Izin runtime menurut versi Android: Bluetooth baru sejak 12 (API 31), Wi-Fi sekitar sejak 13 (API 33). */
-const requiredPermissions = (): Permission[] => {
+const LOCATION = ['android.permission.ACCESS_FINE_LOCATION', 'android.permission.ACCESS_COARSE_LOCATION'];
+
+/**
+ * Izin runtime menurut versi Android: Bluetooth baru sejak 12 (API 31), Wi-Fi sekitar sejak 13 (API 33). Lokasi
+ * dibutuhkan Google Play Services untuk menemukan perangkat di semua versi (cukup lokasi perkiraan atau tepat).
+ */
+const requiredPermissions = (): { all: Permission[]; location: Permission[] } => {
   const api = Number(Platform.Version);
   const list: string[] = [];
-  if (api <= 31) list.push('android.permission.ACCESS_FINE_LOCATION');
   if (api >= 31) list.push('android.permission.BLUETOOTH_SCAN', 'android.permission.BLUETOOTH_ADVERTISE', 'android.permission.BLUETOOTH_CONNECT');
   if (api >= 33) list.push('android.permission.NEARBY_WIFI_DEVICES');
-  return list as Permission[];
+  return { all: [...list, ...LOCATION] as Permission[], location: LOCATION as Permission[] };
 };
 
 export const requestNearbyPermissions = async (): Promise<boolean> => {
   if (!nearbySupported) return false;
-  const result = await PermissionsAndroid.requestMultiple(requiredPermissions());
-  return Object.values(result).every(value => value === PermissionsAndroid.RESULTS.GRANTED);
+  const { all, location } = requiredPermissions();
+  const result = await PermissionsAndroid.requestMultiple(all);
+  const granted = (permission: Permission) => result[permission] === PermissionsAndroid.RESULTS.GRANTED;
+  // lokasi: salah satu (tepat/perkiraan) cukup; selebihnya harus diizinkan semua
+  return all.filter(permission => !location.includes(permission)).every(granted) && location.some(granted);
 };
 
 export const startNearby = (name: string) => native!.start(name);

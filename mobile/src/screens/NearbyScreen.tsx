@@ -7,6 +7,7 @@ import { requestNearbyPermissions } from '../lib/nearby';
 import {
   acceptIncoming,
   connectTo,
+  getRadarError,
   getRadarPeers,
   getRadarWarning,
   isRadarOn,
@@ -61,10 +62,10 @@ export const NearbyScreen = ({ onBack, onOpenStranger, onOpenContact }: Props) =
       return;
     }
     if (!(await requestNearbyPermissions())) {
-      setError('Siaran Dekat butuh izin Bluetooth dan perangkat di sekitar');
+      setError('Siaran Dekat butuh izin Perangkat di sekitar dan Lokasi. Aktifkan lewat Pengaturan > Aplikasi > seru24 > Izin');
       return;
     }
-    if (!(await startRadar())) setError('Gagal memulai. Pastikan Bluetooth/Wi-Fi aktif dan Google Play Services tersedia');
+    if (!(await startRadar())) setError(`Gagal memulai${getRadarError() ? `: ${getRadarError()}` : ''}. Pastikan Bluetooth dan Wi-Fi aktif`);
   };
 
   const openContact = useCallback(async (peer: RadarPeer) => {

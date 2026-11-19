@@ -15,6 +15,7 @@ import { Avatar } from '../components/Avatar';
 import { searchMessages } from '../../../web/shared/search-core';
 import { dropNearbyReceived, nearbyReceivedFor, requestNearbyPermissions } from '../lib/nearby';
 import {
+  getRadarError,
   isRadarOn,
   onRadarAck,
   onRadarChange,
@@ -909,11 +910,11 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
       return;
     }
     if (!(await requestNearbyPermissions())) {
-      setError('Siaran Dekat butuh izin Bluetooth dan perangkat di sekitar');
+      setError('Siaran Dekat butuh izin Perangkat di sekitar dan Lokasi');
       return;
     }
     setError('');
-    if (!(await startRadar())) setError('Siaran Dekat gagal dimulai. Pastikan Bluetooth/Wi-Fi aktif dan Google Play Services tersedia');
+    if (!(await startRadar())) setError(`Siaran Dekat gagal dimulai${getRadarError() ? `: ${getRadarError()}` : ''}. Pastikan Bluetooth dan Wi-Fi aktif`);
   };
 
   /** Tekan lama pada gelembung: balas, atau hapus (pesan sendiri). Pesan yang belum punya id server (seq 0) tidak bisa. */

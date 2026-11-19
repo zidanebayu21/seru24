@@ -14,7 +14,7 @@ import { loadLocalConversations, saveLocalConversations } from '../lib/chatStora
 import { account, inbox, listConversations, rpc } from '../lib/core';
 import { getPreview, previewFromEvent, refreshPreviews } from '../lib/previews';
 import { requestNearbyPermissions } from '../lib/nearby';
-import { getRadarPeers, isRadarOn, onRadarChange, radarSupported, startRadar, stopRadar } from '../lib/radar';
+import { getRadarError, getRadarPeers, isRadarOn, onRadarChange, radarSupported, startRadar, stopRadar } from '../lib/radar';
 import { isStandby, loadStandby, setStandby } from '../lib/standby';
 import { AccountMenu } from '../components/AccountMenu';
 import { Avatar } from '../components/Avatar';
@@ -67,8 +67,12 @@ export const ChatListScreen = ({ onOpen, onOpenNearby, onSignedOut }: Props) => 
       await stopRadar();
       return;
     }
-    if (!radarSupported || !(await requestNearbyPermissions()) || !(await startRadar())) {
-      setError('Siaran Dekat tidak bisa dinyalakan: butuh Android dengan Google Play Services, izin Bluetooth, dan Bluetooth/Wi-Fi aktif');
+    if (!radarSupported) {
+      setError('Siaran Dekat hanya tersedia di Android dengan Google Play Services');
+    } else if (!(await requestNearbyPermissions())) {
+      setError('Siaran Dekat butuh izin Perangkat di sekitar dan Lokasi. Aktifkan lewat Pengaturan > Aplikasi > seru24 > Izin');
+    } else if (!(await startRadar())) {
+      setError(`Siaran Dekat gagal dinyalakan${getRadarError() ? `: ${getRadarError()}` : ''}. Pastikan Bluetooth dan Wi-Fi aktif`);
     }
   };
 

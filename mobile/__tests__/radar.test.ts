@@ -8,6 +8,7 @@ jest.mock('../src/lib/core', () => ({
   readSetting: jest.fn(async (k: string) => mockSettings.get(k) ?? null),
   writeSetting: jest.fn(async (k: string, v: string) => { mockSettings.set(k, v); }),
   isOnline: () => false,
+  whenAccountReady: async () => 'ready',
   rpc: jest.fn(),
   listConversations: jest.fn(),
   e2ee: {

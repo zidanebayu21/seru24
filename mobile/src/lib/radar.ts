@@ -17,7 +17,7 @@ import {
   type NearbyHello,
   type NearbySendParams,
 } from '../../../web/shared/nearby-core';
-import { account, e2ee } from './core';
+import { account, e2ee, whenAccountReady } from './core';
 import { loadLocalConversations } from './chatStorage';
 import {
   acceptNearby,
@@ -75,6 +75,7 @@ let active = false;
 let sessionId = '';
 let contacts: KnownContact[] = [];
 let lastWarning = '';
+let lastError = '';
 const peers = new Map<string, RadarPeer>();
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 const badPayloads = new Map<string, number>();
@@ -91,6 +92,8 @@ export const radarSupported = nearbySupported;
 export const isRadarOn = () => active;
 export const getRadarPeers = (): RadarPeer[] => [...peers.values()];
 export const getRadarWarning = () => lastWarning;
+/** Penyebab kegagalan menyalakan siaran terakhir (dari Google Play Services), untuk ditampilkan ke pengguna. */
+export const getRadarError = () => lastError;
 export const onRadarChange = (listener: () => void) => {
   changeListeners.add(listener);
   return () => {
@@ -333,7 +336,17 @@ const handleEvent = (event: NearbyEvent) => {
 
 /** Nyalakan siaran. Izin runtime diminta lebih dulu oleh pemanggil (requestNearbyPermissions). */
 export const startRadar = async (): Promise<boolean> => {
-  if (!nearbySupported || !account.me?.id || !e2ee.myPublicKey()) return false;
+  lastError = '';
+  if (!nearbySupported) {
+    lastError = 'perangkat tidak mendukung';
+    return false;
+  }
+  // tepat setelah aplikasi dibuka, kunci chat masih dipulihkan di belakang
+  await whenAccountReady();
+  if (!account.me?.id || !e2ee.myPublicKey()) {
+    lastError = 'kunci chat belum siap, coba lagi sebentar';
+    return false;
+  }
   await refreshContacts();
   sessionId = bytesToHex(randomBytes(4));
   const tags = contacts.map(c => contactTag(c.conversationId, myId()));
@@ -343,8 +356,9 @@ export const startRadar = async (): Promise<boolean> => {
   lastWarning = '';
   try {
     await startNearby(name);
-  } catch {
+  } catch (error) {
     active = false;
+    lastError = error instanceof Error ? error.message : String(error);
     notifyChange();
     return false;
   }
