@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { newAuthSalt } from '../../shared/crypto'
 import { SecureFetchError } from '../../shared/secure-fetch-core'
 import { createSessionCore, isNetworkError, type SecurePost } from '../../shared/session-core'
 
@@ -65,5 +66,46 @@ describe('refresh token cadangan (native)', () => {
     const core = createSessionCore((async (_path: string, payload?: Record<string, unknown>) => { calls.push(payload); return session }) as SecurePost, () => undefined)
     await core.getAccessToken()
     expect(calls[0]).toEqual({})
+  })
+
+  it('loginWithPassword, registerAccount, dan logoutSession', async () => {
+    let capturedWrapKey: Uint8Array | null = null
+    let capturedSalt = ''
+    const posts: Array<{ path: string; payload?: any }> = []
+    const realSalt = newAuthSalt()
+
+    const post = (async (path: string, payload?: any) => {
+      posts.push({ path, payload })
+      if (path === '/api/auth/prelogin') return { salt: realSalt }
+      if (path === '/api/auth/login') return session
+      if (path === '/api/auth/register') return { status: 'active', ...session }
+      if (path === '/api/auth/logout') return { ok: true }
+      return {}
+    }) as SecurePost
+
+    const core = createSessionCore(
+      post,
+      (wrapKey, salt) => {
+        capturedWrapKey = wrapKey
+        capturedSalt = salt
+      },
+    )
+
+    await core.loginWithPassword('john', 'password123')
+    expect(await core.getAccessToken()).toBe('at')
+    expect(capturedWrapKey).toBeTruthy()
+    expect(capturedSalt).toBe(realSalt)
+
+    const regStatus = await core.registerAccount({
+      email: 'a@b.com',
+      username: 'ab',
+      display_name: 'AB',
+      password: 'password123',
+    })
+    expect(regStatus).toBe('active')
+
+    await core.logoutSession()
+    core.clearLocalSession()
+    expect(await core.getAccessToken()).toBeFalsy()
   })
 })
