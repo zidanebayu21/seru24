@@ -55,7 +55,7 @@ describe('buildUsageSection', () => {
     const { text } = buildUsageSection({ ...base, overview: { mau: 5, messages_created: 200, messages_deleted: 20, devices_active: 4 } })
     expect(text).toContain('Kuota direset: 11 Desember 2026 (22 hari lagi)')
     expect(text).toContain('Pengguna aktif bulanan (MAU): 5 / 50.000 (<0,1%)')
-    expect(text).toContain('Pesan Realtime (minimal): 440 / 2.000.000')
+    expect(text).toContain('Pesan Realtime (minimal): 640 / 2.000.000')
     expect(text).toContain('Database: 34.0 MB / 512.0 MB (6,6%)')
     expect(text).toContain('1.000/menit per pengguna+IP')
     expect(text).toContain('Senin dan Kamis 08.00 WIB')
@@ -67,8 +67,8 @@ describe('buildUsageSection', () => {
     expect(text).toContain('Database: 34.0 MB')
   })
 
-  it('perkiraan pesan Realtime = 2 x (dibuat + dihapus)', () => {
-    expect(estimateRealtimeMessages({ mau: 0, messages_created: 10, messages_deleted: 5, devices_active: 0 })).toBe(30)
+  it('perkiraan pesan Realtime = 3 x dibuat + 2 x dihapus', () => {
+    expect(estimateRealtimeMessages({ mau: 0, messages_created: 10, messages_deleted: 5, devices_active: 0 })).toBe(40)
   })
 
   it('kuota Free sesuai dashboard dan teks di HTML di-escape', () => {

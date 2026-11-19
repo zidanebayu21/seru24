@@ -89,15 +89,18 @@ export interface UsageSectionInput {
 
 type Row = [label: string, value: string, note?: string]
 
-/** Perkiraan minimal pesan Realtime: tiap pesan baru dan tiap pesan dihapus/diedit disiarkan ke 2 anggota. */
-export const estimateRealtimeMessages = (overview: UsageOverview): number => 2 * (overview.messages_created + overview.messages_deleted)
+/**
+ * Perkiraan pesan Realtime yang bisa dihitung dari database: tiap pesan baru dan tiap pesan dihapus/diedit disiarkan ke
+ * 2 anggota, ditambah kira-kira 1 status baca per pesan. Koneksi, presence, dan heartbeat tidak terlihat dari database.
+ */
+export const estimateRealtimeMessages = (overview: UsageOverview): number => 3 * overview.messages_created + 2 * overview.messages_deleted
 
 export const buildUsageSection = (input: UsageSectionInput): { text: string; html: string } => {
   const limits = input.limits ?? SUPABASE_FREE_LIMITS
   const { cycle, overview, app } = input
 
   const quota: Row[] = [
-    ['Database', `${size(input.dbBytes)} / ${size(limits.databaseBytes)} (${percent(input.dbBytes, limits.databaseBytes)})`],
+    ['Database', `${size(input.dbBytes)} / ${size(limits.databaseBytes)} (${percent(input.dbBytes, limits.databaseBytes)})`, 'ukuran data di Postgres; dashboard menampilkan angka lebih besar karena ikut menghitung WAL dan sistem'],
     overview
       ? ['Pengguna aktif bulanan (MAU)', `${number(overview.mau)} / ${number(limits.mau)} (${percent(overview.mau, limits.mau)})`, 'aktif di aplikasi sejak awal siklus']
       : ['Pengguna aktif bulanan (MAU)', 'belum tersedia', 'jalankan migrasi seru24_usage_overview'],
@@ -105,14 +108,16 @@ export const buildUsageSection = (input: UsageSectionInput): { text: string; htm
       ? [
         'Pesan Realtime (minimal)',
         `${number(estimateRealtimeMessages(overview))} / ${number(limits.realtimeMessages)} (${percent(estimateRealtimeMessages(overview), limits.realtimeMessages)})`,
-        'hanya pesan baru dan hapus; belum termasuk status baca, mengetik, dan online, jadi angka di dashboard lebih besar',
+        'perkiraan bawah dari pesan baru, hapus, dan status baca; dashboard juga menghitung koneksi dan presence sehingga lebih besar',
       ]
       : ['Pesan Realtime', 'belum tersedia', 'jalankan migrasi seru24_usage_overview'],
   ]
   const unmeasured: Row[] = [
-    ['Egress', `batas ${limits.egressGb} GB`, 'hanya terlihat di dashboard Supabase (Usage)'],
-    ['Koneksi Realtime puncak', `batas ${limits.realtimePeakConnections}`, 'dashboard Supabase'],
-    ['Log ingestion / Storage', `batas ${limits.logIngestionGb} GB / ${limits.storageGb} GB`, 'dashboard Supabase'],
+    ['Egress', `– / ${limits.egressGb} GB`, 'lihat dashboard Supabase > Usage'],
+    ['Koneksi Realtime puncak', `– / ${limits.realtimePeakConnections}`, 'lihat dashboard Supabase > Usage'],
+    ['Log ingestion', `– / ${limits.logIngestionGb} GB`, 'lihat dashboard Supabase > Usage'],
+    ['Storage', `tidak dipakai / ${limits.storageGb} GB`, 'dokumen disimpan di Google Drive'],
+    ['Edge Function', `tidak dipakai / ${number(limits.edgeFunctionInvocations)}`, 'server memakai Vercel'],
   ]
   const limitRows: Row[] = [
     ['Panjang pesan teks', `${number(app.maxTextLength)} karakter`],
@@ -132,7 +137,7 @@ export const buildUsageSection = (input: UsageSectionInput): { text: string; htm
   const groups: Array<[string, Row[]]> = [
     ['Siklus dan jadwal', schedule],
     ['Pemakaian kuota Supabase (paket Free)', quota],
-    ['Tidak terukur dari database', unmeasured],
+    ['Dari dashboard Supabase (tidak terbaca dari database)', unmeasured],
     ['Batas aplikasi', limitRows],
   ]
 
