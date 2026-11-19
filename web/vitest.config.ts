@@ -1,11 +1,16 @@
+import path from 'node:path'
 import { defineConfig } from 'vitest/config'
 
-// Semua test web ada di test/, dengan struktur folder sama seperti kode yang diuji (test/shared -> shared,
-// test/server/utils -> server/utils). Satu sumber ini juga yang dibaca SonarQube (sonar.tests).
 export default defineConfig({
+  resolve: {
+    alias: {
+      '#shared': path.resolve(__dirname, './shared'),
+    },
+  },
   test: {
     include: ['test/**/*.test.ts'],
     environment: 'node',
+    setupFiles: ['./test/setup.ts'],
     testTimeout: 20000,
     coverage: {
       provider: 'v8',

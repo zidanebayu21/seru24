@@ -6,6 +6,6 @@ module.exports = {
   ],
   // Test mobile ada di __tests__/ (dibaca SonarQube lewat sonar.tests); laporan lcov untuk coverage.
   testMatch: ['<rootDir>/__tests__/**/*.test.[jt]s?(x)'],
-  collectCoverageFrom: ['src/lib/**/*.ts'],
+  collectCoverageFrom: ['src/lib/**/*.ts', 'src/theme.ts', 'src/polyfills.ts'],
   coverageReporters: ['text-summary', 'lcov'],
 };

@@ -113,4 +113,49 @@ describe('mobile chatStorage', () => {
     expect(mockSecureStore.has('seru24.chat_wrap.u1')).toBe(false);
     expect(mockSecureStore.get('seru24.keyring.u1')).toBe('keep-me');
   });
+
+  it('menggunakan modul native SQLite bila NativeModules.Seru24ChatStore terpasang', async () => {
+    const { NativeModules } = require('react-native');
+    const mockNative = {
+      saveConversations: jest.fn(async () => {}),
+      loadConversations: jest.fn(async () => ['{"n":"AA==","c":"BB=="}']),
+      saveMessages: jest.fn(async () => {}),
+      loadConversationState: jest.fn(async () => ({ messages: [], deletedIds: [], clearedUpToSeq: 0 })),
+      clearConversation: jest.fn(async () => {}),
+      clearAllChats: jest.fn(async () => {}),
+      resetDatabase: jest.fn(async () => {}),
+      getStats: jest.fn(async () => ({ conversations: 5, messages: 10, sizeBytes: 2048 })),
+    };
+    Object.assign(NativeModules, { Seru24ChatStore: mockNative });
+
+    jest.isolateModules(async () => {
+      const storage = require('../src/lib/chatStorage');
+      await storage.saveLocalConversations('u1', [makeConv('c1')]);
+      expect(mockNative.saveConversations).toHaveBeenCalled();
+
+      await storage.loadLocalConversations('u1');
+      expect(mockNative.loadConversations).toHaveBeenCalled();
+
+      await storage.saveLocalMessages('u1', 'c1', [makeMsg('c1', 'm1', 1)]);
+      expect(mockNative.saveMessages).toHaveBeenCalled();
+
+      await storage.loadLocalConversationState('u1', 'c1');
+      expect(mockNative.loadConversationState).toHaveBeenCalled();
+
+      await storage.clearLocalConversation('u1', 'c1', 1);
+      expect(mockNative.clearConversation).toHaveBeenCalled();
+
+      await storage.clearAllLocalChats('u1');
+      expect(mockNative.clearAllChats).toHaveBeenCalled();
+
+      await storage.resetFullLocalStorage('u1');
+      expect(mockNative.resetDatabase).toHaveBeenCalled();
+
+      const stats = await storage.getLocalChatStorageStats('u1');
+      expect(stats.conversations).toBe(5);
+      expect(stats.sizeBytes).toBe(2048);
+    });
+
+    delete (NativeModules as any).Seru24ChatStore;
+  });
 });

@@ -110,4 +110,55 @@ describe('smtp daily stats helper', () => {
     expect(mime).toContain('Content-Type: text/plain')
     expect(mime).toContain('Content-Type: text/html')
   })
+
+  it('mengirim email SMTP lewat soket TCP mock', async () => {
+    const net = await import('node:net')
+    const { sendSmtpMail } = await import('../../../server/utils/smtp')
+
+    const server = net.createServer((socket) => {
+      socket.write('220 mock-smtp-server ready\r\n')
+      socket.on('data', (chunk) => {
+        const text = chunk.toString('utf8')
+        if (text.startsWith('EHLO')) {
+          socket.write('250-mock\r\n250 OK\r\n')
+        } else if (text.startsWith('MAIL FROM:')) {
+          socket.write('250 Sender OK\r\n')
+        } else if (text.startsWith('RCPT TO:')) {
+          socket.write('250 Recipient OK\r\n')
+        } else if (text.startsWith('DATA')) {
+          socket.write('354 Go ahead\r\n')
+        } else if (text.includes('\r\n.\r\n')) {
+          socket.write('250 Message accepted for delivery\r\n')
+        } else if (text.startsWith('QUIT')) {
+          socket.write('221 Bye\r\n')
+          socket.end()
+        }
+      })
+    })
+
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const addr = server.address() as net.AddressInfo
+
+    const config = {
+      host: '127.0.0.1',
+      port: addr.port,
+      secure: false,
+      user: '',
+      pass: '',
+      from: 'sender@example.com',
+      to: ['recipient@example.com'],
+    }
+
+    try {
+      const res = await sendSmtpMail(config, {
+        subject: 'Test Subject',
+        text: 'Test Body',
+        html: '<p>Test Body</p>',
+      })
+      expect(res.ok).toBe(true)
+      expect(res.response).toContain('250 Message accepted')
+    } finally {
+      server.close()
+    }
+  })
 })
