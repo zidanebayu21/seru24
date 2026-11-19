@@ -5,6 +5,14 @@ const found = ref<FoundUser | null>(null)
 const searched = ref(false)
 const error = ref('')
 const busy = ref(false)
+const hasMore = ref(false)
+const loadingMore = ref(false)
+
+const saveCache = async (myId: string | undefined, fresh: Conversation[]) => {
+  if (!myId) return
+  const cached = hasMore.value ? await loadLocalConversations(myId).catch(() => []) : []
+  saveLocalConversations(myId, cacheableConversations(fresh, cached, hasMore.value)).catch(() => undefined)
+}
 
 const load = async () => {
   const myId = account.me?.id
@@ -13,11 +21,29 @@ const load = async () => {
     if (cached.length > 0) conversations.value = cached
   }
   try {
-    const fresh = await listConversations()
+    // muat ulang sebanyak yang sudah tampil (minimal satu halaman) agar daftar tidak menciut saat ada pesan baru
+    const limit = Math.max(CONVERSATION_PAGE_SIZE, conversations.value.length)
+    const fresh = await listConversations({ limit })
     conversations.value = fresh
-    if (myId) saveLocalConversations(myId, fresh).catch(() => undefined)
+    hasMore.value = fresh.length >= limit
+    await saveCache(myId, fresh)
   } catch {
     if (conversations.value.length === 0) error.value = 'Gagal memuat percakapan'
+  }
+}
+
+const loadMore = async () => {
+  if (loadingMore.value || !hasMore.value) return
+  loadingMore.value = true
+  try {
+    const page = await listConversations({ limit: CONVERSATION_PAGE_SIZE, offset: conversations.value.length })
+    conversations.value = appendConversations(conversations.value, page)
+    hasMore.value = page.length >= CONVERSATION_PAGE_SIZE
+    await saveCache(account.me?.id, conversations.value)
+  } catch {
+    error.value = 'Gagal memuat percakapan berikutnya'
+  } finally {
+    loadingMore.value = false
   }
 }
 
@@ -108,6 +134,9 @@ onMounted(load)
         </NuxtLink>
       </li>
     </ul>
+    <button v-if="hasMore" class="more" type="button" :disabled="loadingMore" @click="loadMore">
+      {{ loadingMore ? 'Memuat…' : 'Muat lebih banyak' }}
+    </button>
     <p v-if="!conversations.length" class="muted empty">Belum ada percakapan. Cari teman dengan username-nya.</p>
   </main>
 </template>
@@ -115,6 +144,7 @@ onMounted(load)
 <style scoped>
 .page { max-width: 640px; margin: 0 auto; padding: 16px; display: grid; gap: 12px; }
 .top { justify-content: space-between; }
+.more { justify-self: center; }
 .brand { color: var(--accent); font-size: 18px; }
 .search input { flex: 1; }
 .found, .item {

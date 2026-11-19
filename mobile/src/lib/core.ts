@@ -10,7 +10,7 @@ import { createAccountCore, type AccountState, type AccountStatus, type Me } fro
 import { createE2ee } from '../../../web/shared/e2ee-core';
 import { createInbox } from '../../../web/shared/inbox-core';
 import { createConversationPresence, type PeerPresence } from '../../../web/shared/presence-core';
-import type { Conversation } from '../../../web/shared/chat-core';
+import { listConversationsArgs, type Conversation, type ListConversationsOptions } from '../../../web/shared/chat-core';
 import { API_BASE_URL, REALTIME_PRESENCE, SUPABASE_ANON_KEY, SUPABASE_URL } from '../env';
 import { installNativeScrypt } from './nativeScrypt';
 
@@ -186,7 +186,8 @@ export const openConversationPresence = (conversationId: string, onChange: (stat
     ? createConversationPresence(getSupabase(), conversationId, account.me.id, onChange)
     : null;
 
-export const listConversations = () => rpc<Conversation[]>('seru24_list_conversations');
+export const listConversations = (options?: ListConversationsOptions) =>
+  rpc<Conversation[]>('seru24_list_conversations', listConversationsArgs(options));
 
 /** Hapus dokumen milik sendiri di server dan Google Drive (dipanggil sebelum pesannya dihapus). */
 export const deleteRemoteFile = async (id: string) => {

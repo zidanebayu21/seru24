@@ -6,6 +6,36 @@ export const CHAT_PREFETCH_OFFSET = 10
 /** FlatList onEndReachedThreshold memakai satuan tinggi layar (~10 pesan/layar = sekitar 40 dari 50 pesan). */
 export const CHAT_MOBILE_PREFETCH_SCREENS = 1
 
+/** Jumlah percakapan per halaman di daftar chat. */
+export const CONVERSATION_PAGE_SIZE = 50
+
+export interface ListConversationsOptions {
+  limit?: number
+  offset?: number
+  /** Ambil satu percakapan saja (mis. saat membuka chat yang tidak ada di halaman yang sudah dimuat). */
+  id?: string
+}
+
+/** Argumen RPC seru24_list_conversations; kunci yang kosong tidak dikirim. */
+export const listConversationsArgs = (options: ListConversationsOptions = {}): Record<string, unknown> => ({
+  ...(options.limit === undefined ? {} : { p_limit: options.limit }),
+  ...(options.offset === undefined ? {} : { p_offset: options.offset }),
+  ...(options.id === undefined ? {} : { p_id: options.id }),
+})
+
+/** Tambahkan halaman berikutnya tanpa duplikat (percakapan bisa bergeser antar-halaman saat ada pesan baru). */
+export const appendConversations = (current: Conversation[], page: Conversation[]): Conversation[] => {
+  const known = new Set(current.map((conversation) => conversation.id))
+  return [...current, ...page.filter((conversation) => !known.has(conversation.id))]
+}
+
+/**
+ * Isi cache lokal: bila daftar baru hanya sebagian (masih ada halaman lain), percakapan lama yang belum
+ * dimuat dipertahankan; bila lengkap, daftar baru menggantikan cache (percakapan yang sudah hilang ikut hilang).
+ */
+export const cacheableConversations = (fresh: Conversation[], cached: Conversation[], hasMore: boolean): Conversation[] =>
+  hasMore ? appendConversations(fresh, cached) : fresh
+
 export interface Conversation {
   id: string
   status: 'pending' | 'accepted'

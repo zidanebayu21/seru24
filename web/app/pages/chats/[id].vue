@@ -127,8 +127,8 @@ const load = async () => {
   const myId = account.me?.id ?? ''
   let list: Conversation[] = []
   try {
-    list = await listConversations()
-    if (myId) saveLocalConversations(myId, list).catch(() => undefined)
+    // satu percakapan saja: yang dibuka bisa ada di luar halaman daftar chat yang sudah dimuat
+    list = await listConversations({ id: conversationId })
   } catch {
     if (myId) list = await loadLocalConversations(myId).catch(() => [])
   }

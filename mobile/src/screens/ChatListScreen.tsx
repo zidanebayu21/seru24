@@ -1,6 +1,15 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, Text, TextInput, View } from 'react-native';
-import { formatTime, isIncomingRequest, peerLabel, type Conversation, type FoundUser } from '../../../web/shared/chat-core';
+import {
+  CONVERSATION_PAGE_SIZE,
+  appendConversations,
+  cacheableConversations,
+  formatTime,
+  isIncomingRequest,
+  peerLabel,
+  type Conversation,
+  type FoundUser,
+} from '../../../web/shared/chat-core';
 import { loadLocalConversations, saveLocalConversations } from '../lib/chatStorage';
 import { account, inbox, listConversations, rpc } from '../lib/core';
 import { AccountMenu } from '../components/AccountMenu';
@@ -23,6 +32,17 @@ export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
   const [refreshing, setRefreshing] = useState(false);
   // sinkronisasi dengan server berjalan di belakang daftar dari cache lokal
   const [syncing, setSyncing] = useState(true);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const conversationsRef = useRef<Conversation[]>([]);
+  conversationsRef.current = conversations;
+
+  /** Daftar sebagian: percakapan lama di cache yang belum dimuat dipertahankan; daftar lengkap menggantikan cache. */
+  const saveCache = async (myId: string | undefined, list: Conversation[], more: boolean) => {
+    if (!myId) return;
+    const cached = more ? await loadLocalConversations(myId).catch(() => [] as Conversation[]) : [];
+    saveLocalConversations(myId, cacheableConversations(list, cached, more)).catch(() => undefined);
+  };
 
   const load = useCallback(async () => {
     const myId = account.me?.id;
@@ -36,10 +56,14 @@ export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
     }
     setSyncing(true);
     try {
-      const fresh = await listConversations();
+      // muat ulang sebanyak yang sudah tampil (minimal satu halaman) agar daftar tidak menciut saat ada pesan baru
+      const limit = Math.max(CONVERSATION_PAGE_SIZE, conversationsRef.current.length);
+      const fresh = await listConversations({ limit });
+      const more = fresh.length >= limit;
       setConversations(fresh);
+      setHasMore(more);
       setError('');
-      if (myId) saveLocalConversations(myId, fresh).catch(() => undefined);
+      await saveCache(myId, fresh, more);
     } catch {
       if (!hasCached) setError('Gagal memuat percakapan');
     } finally {
@@ -60,6 +84,24 @@ export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
       clearTimeout(timer);
     };
   }, [load]);
+
+  const loadMore = async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const current = conversationsRef.current;
+      const page = await listConversations({ limit: CONVERSATION_PAGE_SIZE, offset: current.length });
+      const merged = appendConversations(current, page);
+      const more = page.length >= CONVERSATION_PAGE_SIZE;
+      setConversations(merged);
+      setHasMore(more);
+      await saveCache(account.me?.id, merged, more);
+    } catch {
+      setError('Gagal memuat percakapan berikutnya');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const search = async () => {
     setError('');
@@ -87,11 +129,12 @@ export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
         setError('Tidak dapat memulai percakapan dengan pengguna ini');
         return;
       }
-      const list = await listConversations();
-      setConversations(list);
-      if (account.me?.id) saveLocalConversations(account.me.id, list).catch(() => undefined);
-      const conversation = list.find(c => c.id === result.conversation_id);
-      if (conversation) onOpen(conversation);
+      // hanya percakapan ini yang diambil (bisa di luar halaman yang sudah dimuat), lalu ditaruh paling atas
+      const [conversation] = await listConversations({ id: result.conversation_id });
+      if (conversation) {
+        setConversations(prev => appendConversations([conversation], prev));
+        onOpen(conversation);
+      }
     } catch {
       setError('Tidak dapat memulai percakapan');
     } finally {
@@ -150,6 +193,9 @@ export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
         keyExtractor={c => c.id}
         contentContainerStyle={{ gap: 8 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={loadingMore ? <ActivityIndicator style={{ paddingVertical: 12 }} /> : undefined}
         ListEmptyComponent={<Text style={[ui.muted, { textAlign: 'center', paddingVertical: 24 }]}>Belum ada percakapan. Cari teman dengan username-nya.</Text>}
         renderItem={({ item }) => (
           <Pressable onPress={() => onOpen(item)} style={[ui.card, styles.item]}>
