@@ -100,9 +100,16 @@ const quoteOf = (b: Bubble) => {
 const startPresence = () => {
   const myId = account.me?.id
   if (!myId || !useRuntimeConfig().public.realtimePresence) return
-  presence = createConversationPresence(useSupabase(), conversationId, myId, (state) => { peerPresence.value = state })
+  ensureSupabase().then((client) => {
+    if (closed) return
+    presence = createConversationPresence(client, conversationId, myId, (state) => { peerPresence.value = state })
+  }, () => undefined)
 }
-onBeforeUnmount(() => presence?.close())
+let closed = false
+onBeforeUnmount(() => {
+  closed = true
+  presence?.close()
+})
 
 const scrollToBottom = async () => {
   await nextTick()
@@ -449,12 +456,15 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
 <template>
   <main v-if="conversation" class="chat">
     <header class="bar row">
-      <NuxtLink to="/chats" class="back" aria-label="Kembali">←</NuxtLink>
+      <NuxtLink to="/chats" class="back" aria-label="Kembali">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7" /></svg>
+      </NuxtLink>
+      <Avatar :name="peerLabel(conversation)" :seed="conversation.peer_username" :size="40" />
       <div class="who">
         <strong>{{ peerLabel(conversation) }}</strong>
         <p class="muted" :class="{ typing: peerPresence.typing }">{{ subtitle }}</p>
       </div>
-      <button type="button" @click="showSafety = !showSafety">Keamanan</button>
+      <button type="button" class="ghost" :aria-expanded="showSafety" @click="showSafety = !showSafety">Keamanan</button>
     </header>
 
     <section v-if="showSafety" class="panel stack">
@@ -503,7 +513,9 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
         <p v-if="b.deleted" class="muted"><em>Pesan dihapus</em></p>
         <p v-else-if="b.text === null" class="muted"><em>Pesan tidak dapat dibuka</em></p>
         <div v-else-if="b.file" class="doc row">
-          <span class="doc-icon" aria-hidden="true">📎</span>
+          <span class="doc-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></svg>
+          </span>
           <span class="doc-info">
             <strong class="doc-name">{{ b.file.name }}</strong>
             <span class="muted">{{ formatFileSize(b.file.size) }}</span>
@@ -530,7 +542,9 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
             aria-label="Balas pesan"
             title="Balas"
             @click="startReply(b)"
-          >↩</button>
+          >
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 8L5 13l5 5" /><path d="M5 13h9a5 5 0 0 1 5 5" /></svg>
+          </button>
           <button
             v-if="b.mine && b.id && !b.deleted"
             type="button"
@@ -538,7 +552,9 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
             aria-label="Hapus pesan"
             title="Hapus pesan"
             @click="removeMessage(b)"
-          >&times;</button>
+          >
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16" /><path d="M9 7V4h6v3" /><path d="M6 7l1 13h10l1-13" /></svg>
+          </button>
         </div>
       </div>
     </div>
@@ -560,7 +576,9 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
         title="Kirim dokumen (maks 50 MB per file)"
         :disabled="keyStatus.status === 'missing' || conversation.peer_blocked"
         @click="fileInput?.click()"
-      >📎</button>
+      >
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9" /></svg>
+      </button>
       <textarea
         v-model="draft"
         rows="1"
@@ -570,7 +588,9 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
         @keydown.enter.exact.prevent="send"
         @input="presence?.notifyTyping()"
       />
-      <button class="primary" type="submit" :disabled="!draft.trim() || keyStatus.status === 'missing'">Kirim</button>
+      <button class="primary send" type="submit" aria-label="Kirim pesan" :disabled="!draft.trim() || keyStatus.status === 'missing'">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14" /><path d="M13 6l6 6-6 6" /></svg>
+      </button>
     </form>
   </main>
   <p v-else-if="error" class="error" style="padding: 16px">{{ error }}</p>
@@ -584,10 +604,13 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 12px 16px;
+  padding: 10px 14px 14px;
 }
-.bar { gap: 12px; }
-.back { font-size: 20px; text-decoration: none; padding: 4px 8px; }
+.bar { gap: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.back { display: grid; place-items: center; width: 36px; height: 36px; margin-left: -6px; border-radius: 50%; color: var(--text); }
+.back:hover { background: color-mix(in srgb, var(--text) 8%, transparent); }
+.ghost { min-height: 34px; padding: 5px 12px; border-color: transparent; background: transparent; color: var(--muted); font-size: 13px; }
+.ghost:hover:not(:disabled), .ghost[aria-expanded="true"] { background: color-mix(in srgb, var(--text) 7%, transparent); border-color: transparent; }
 .who { flex: 1; min-width: 0; }
 .who p { margin: 0; }
 .panel { padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
@@ -604,23 +627,37 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
 }
 .older { align-self: center; font-size: 13px; }
 .bubble {
-  max-width: 78%;
-  padding: 8px 12px;
-  border-radius: 14px;
+  max-width: min(78%, 34rem);
+  padding: 7px 11px 5px;
+  border-radius: 16px 16px 16px 5px;
   background: var(--theirs);
-  border: 1px solid var(--border);
+  box-shadow: 0 1px 1px rgb(0 0 0 / 7%), 0 0 0 1px color-mix(in srgb, var(--border) 70%, transparent);
   align-self: flex-start;
 }
-.bubble.mine { align-self: flex-end; background: var(--mine); }
-.bubble.failed { border-color: var(--danger); }
+.bubble.mine { align-self: flex-end; border-radius: 16px 16px 5px 16px; background: var(--mine); box-shadow: 0 1px 1px rgb(0 0 0 / 5%); }
+.bubble.failed { box-shadow: 0 0 0 1.5px var(--danger); }
 .bubble p { margin: 0; }
 .text { white-space: pre-wrap; overflow-wrap: anywhere; }
-.foot { justify-content: flex-end; gap: 8px; }
+.foot { justify-content: flex-end; gap: 6px; min-height: 18px; }
 .foot .muted { font-size: 11px; }
-.icon-del { padding: 0 2px; border: 0; background: none; color: var(--muted); font-size: 15px; line-height: 1; cursor: pointer; }
-.icon-del:hover { color: var(--danger); }
-.icon-reply { padding: 0 2px; border: 0; background: none; color: var(--muted); font-size: 14px; line-height: 1; cursor: pointer; }
-.icon-reply:hover { color: var(--accent); }
+.icon-del, .icon-reply {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  min-height: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity .12s, color .12s, background-color .12s;
+}
+.bubble:hover .icon-del, .bubble:hover .icon-reply, .icon-del:focus-visible, .icon-reply:focus-visible { opacity: 1; }
+@media (hover: none) { .icon-del, .icon-reply { opacity: .7; } }
+.icon-del:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.icon-reply:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .ticks { font-size: 12px; letter-spacing: -3px; color: var(--muted); margin-right: 2px; }
 .ticks.read { color: var(--accent); font-weight: 700; }
 .quote { display: flex; flex-direction: column; gap: 1px; padding: 4px 8px; margin-bottom: 4px; border-left: 3px solid var(--accent); border-radius: 6px; background: var(--quote-bg); font-size: 12px; overflow-wrap: anywhere; }
@@ -628,10 +665,32 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
 .replying { gap: 8px; align-items: center; }
 .replying .grow { flex: 1; min-width: 0; margin-bottom: 0; }
 .typing { color: var(--accent); font-style: italic; }
-.composer textarea { flex: 1; resize: none; max-height: 140px; }
-.attach { padding: 6px 10px; font-size: 18px; line-height: 1; }
+.composer {
+  align-items: flex-end;
+  gap: 4px;
+  padding: 5px 5px 5px 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 26px;
+  transition: border-color .15s, box-shadow .15s;
+}
+.composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+.composer textarea { flex: 1; min-height: 40px; resize: none; max-height: 140px; padding: 9px 6px; border: 0; background: transparent; box-shadow: none; }
+.composer textarea:focus { box-shadow: none; }
+.attach, .send { display: grid; place-items: center; flex: none; width: 40px; min-height: 40px; height: 40px; padding: 0; border-radius: 50%; }
+.attach { border-color: transparent; background: transparent; color: var(--muted); }
+.attach:hover:not(:disabled) { border-color: transparent; background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
 .doc { gap: 10px; align-items: center; }
-.doc-icon { font-size: 22px; }
+.doc-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
 .doc-info { display: flex; flex-direction: column; min-width: 0; }
 .doc-name { overflow-wrap: anywhere; }
 .doc-get { padding: 4px 10px; font-size: 13px; }

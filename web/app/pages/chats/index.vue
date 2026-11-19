@@ -98,7 +98,7 @@ onMounted(load)
 <template>
   <main class="page">
     <header class="top row">
-      <strong class="brand">seru24</strong>
+      <h1 class="title">Chat</h1>
       <AccountMenu />
     </header>
 
@@ -116,20 +116,23 @@ onMounted(load)
     <p v-else-if="searched" class="muted">Pengguna tidak ditemukan.</p>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
-    <ul class="list">
+    <ul v-if="conversations.length" class="list">
       <li v-for="c in conversations" :key="c.id">
-        <NuxtLink :to="`/chats/${c.id}`" class="item row">
+        <NuxtLink :to="`/chats/${c.id}`" class="item">
+          <Avatar :name="peerLabel(c)" :seed="c.peer_username" :size="46" />
           <div class="who">
-            <strong>{{ peerLabel(c) }}</strong>
-            <p class="muted">
-              <span v-if="isIncomingRequest(c)">Permintaan chat baru</span>
-              <span v-else-if="c.status === 'pending'">Menunggu diterima</span>
-              <span v-else>@{{ c.peer_username }}</span>
-            </p>
-          </div>
-          <div class="meta">
-            <span class="muted">{{ formatTime(c.last_message_at) }}</span>
-            <span v-if="c.unread > 0" class="badge">{{ c.unread }}</span>
+            <div class="line">
+              <strong>{{ peerLabel(c) }}</strong>
+              <span class="time" :class="{ fresh: c.unread > 0 }">{{ formatTime(c.last_message_at) }}</span>
+            </div>
+            <div class="line">
+              <p class="sub">
+                <template v-if="isIncomingRequest(c)">Permintaan chat baru</template>
+                <template v-else-if="c.status === 'pending'">Menunggu diterima</template>
+                <template v-else>@{{ c.peer_username }}</template>
+              </p>
+              <span v-if="c.unread > 0" class="badge">{{ c.unread }}</span>
+            </div>
           </div>
         </NuxtLink>
       </li>
@@ -142,24 +145,46 @@ onMounted(load)
 </template>
 
 <style scoped>
-.page { max-width: 640px; margin: 0 auto; padding: 16px; display: grid; gap: 12px; }
+.page { max-width: 640px; margin: 0 auto; padding: 20px 16px 32px; display: grid; gap: 14px; }
 .top { justify-content: space-between; }
+.title { margin: 0; font-size: 28px; line-height: 1.1; letter-spacing: -.03em; }
 .more { justify-self: center; }
-.brand { color: var(--accent); font-size: 18px; }
-.search input { flex: 1; }
-.found, .item {
+.search input { flex: 1; border-radius: 999px; padding-left: 18px; }
+.search button { border-radius: 999px; }
+.found {
   justify-content: space-between;
   padding: 12px 14px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 14px;
 }
-.found p, .item p { margin: 0; }
-.list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.item { color: inherit; text-decoration: none; }
-.item:hover { border-color: var(--accent); }
-.who { min-width: 0; }
-.who strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.meta { display: grid; justify-items: end; gap: 4px; }
-.empty { text-align: center; padding: 24px 0; }
+.found p { margin: 0; }
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+}
+.list li + li { border-top: 1px solid var(--border); }
+.item {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 12px 14px;
+  color: inherit;
+  text-decoration: none;
+  transition: background-color .12s;
+}
+.item:hover { background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
+.item:focus-visible { outline-offset: -2px; }
+.who { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.line { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
+.line strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.sub { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 13.5px; }
+.time { flex: none; color: var(--muted); font-size: 12px; }
+.time.fresh { color: var(--accent); font-weight: 600; }
+.empty { text-align: center; padding: 40px 0; }
 </style>

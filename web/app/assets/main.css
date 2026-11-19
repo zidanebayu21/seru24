@@ -68,24 +68,37 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 input, select, textarea {
   width: 100%;
-  padding: 10px 12px;
+  min-height: 44px;
+  padding: 10px 13px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--surface);
+  transition: border-color .15s, box-shadow .15s;
 }
 
-input:focus, textarea:focus, select:focus, button:focus-visible {
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+button:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline-offset: 2px;
 }
 
 button {
-  padding: 10px 14px;
+  min-height: 40px;
+  padding: 9px 15px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--surface);
   cursor: pointer;
+  transition: background-color .15s, border-color .15s, transform .05s;
 }
+
+button:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+button:active:not(:disabled) { transform: translateY(1px); }
 
 button.primary {
   background: var(--accent);
@@ -94,19 +107,30 @@ button.primary {
   font-weight: 600;
 }
 
-button.danger { color: var(--danger); }
-button:disabled { opacity: .6; cursor: default; }
+button.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, #000); }
 
-label { display: grid; gap: 6px; font-size: 14px; color: var(--muted); }
+button.danger { color: var(--danger); }
+button:disabled { opacity: .55; cursor: default; }
+
+label { display: grid; gap: 6px; font-size: 13px; font-weight: 500; color: var(--muted); }
+
+h1, h2, h3 { letter-spacing: -.015em; }
 
 .stack { display: grid; gap: 14px; }
 .row { display: flex; gap: 8px; align-items: center; }
 .muted { color: var(--muted); font-size: 13px; }
 .error { color: var(--danger); font-size: 14px; margin: 0; }
-.notice { background: var(--warn-bg); border-radius: 8px; padding: 10px 12px; font-size: 14px; }
+.notice {
+  margin: 0;
+  padding: 10px 12px 10px 14px;
+  border-left: 3px solid color-mix(in srgb, var(--text) 35%, var(--warn-bg));
+  border-radius: 4px 10px 10px 4px;
+  background: var(--warn-bg);
+  font-size: 14px;
+}
 .badge {
-  min-width: 22px;
-  padding: 1px 7px;
+  min-width: 20px;
+  padding: 1px 6px;
   border-radius: 999px;
   background: var(--accent);
   color: var(--accent-text);

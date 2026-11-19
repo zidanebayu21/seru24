@@ -1,8 +1,9 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import type { SupabaseClient } from '@supabase/supabase-js'
 
 const VISITOR_KEY_STORAGE = 'seru24:visitor-key'
 
 let client: SupabaseClient | null = null
+let sdk: Promise<typeof import('@supabase/supabase-js')> | null = null
 let visitorKey: string | null = null
 
 /**
@@ -28,14 +29,24 @@ export const getVisitorKey = (): string => {
   return visitorKey
 }
 
-export const useSupabase = (): SupabaseClient => {
+/** Library Supabase (+ realtime) cukup besar; dimuat saat pertama dibutuhkan, bukan di bundle awal (halaman login). */
+export const loadSupabase = () => (sdk ??= import('@supabase/supabase-js'))
+
+export const ensureSupabase = async (): Promise<SupabaseClient> => {
   if (!client) {
+    const { createClient } = await loadSupabase()
     const { supabaseUrl, supabaseAnonKey } = useRuntimeConfig().public
-    client = createClient(supabaseUrl, supabaseAnonKey, {
+    client ??= createClient(supabaseUrl, supabaseAnonKey, {
       accessToken: getAccessToken,
       global: { headers: { 'x-visitor-key': getVisitorKey() } },
     })
   }
+  return client
+}
+
+/** Untuk kode sinkron yang berjalan setelah ensureSupabase() selesai (mis. realtime). */
+export const useSupabase = (): SupabaseClient => {
+  if (!client) throw new Error('Supabase belum dimuat')
   return client
 }
 
@@ -44,7 +55,7 @@ export const useSupabase = (): SupabaseClient => {
  * bearer: token khusus (mis. token pemulihan dari email) sebagai pengganti sesi aktif.
  */
 export const rpc = async <T = unknown>(fn: string, args?: Record<string, unknown>, bearer?: string): Promise<T> => {
-  const query = useSupabase().rpc(fn, args)
+  const query = (await ensureSupabase()).rpc(fn, args)
   const { data, error } = await (bearer ? query.setHeader('Authorization', `Bearer ${bearer}`) : query)
   if (error) throw error
   return data as T
