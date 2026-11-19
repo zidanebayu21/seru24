@@ -73,16 +73,20 @@ export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
   }, []);
 
   useEffect(() => {
-    load();
+    void load().catch(() => {});
     let timer: ReturnType<typeof setTimeout> | undefined;
     const stop = inbox.onInbox(event => {
       if (event !== 'message_new') return;
       clearTimeout(timer);
-      timer = setTimeout(load, 300);
+      timer = setTimeout(() => {
+        void load().catch(() => {});
+      }, 300);
     });
     // aktif lagi setelah di latar belakang (realtime putus): susul jumlah belum dibaca dan urutan
     const appState = AppState.addEventListener('change', state => {
-      if (state === 'active') load();
+      if (state === 'active') {
+        void load().catch(() => {});
+      }
     });
     return () => {
       stop();

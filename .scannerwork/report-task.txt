@@ -1,6 +1,0 @@
-projectKey=seru24
-serverUrl=https://literally-intense-population-tokyo.trycloudflare.com
-serverVersion=26.10.0.133078
-dashboardUrl=https://literally-intense-population-tokyo.trycloudflare.com/dashboard?id=seru24
-ceTaskId=ce9e5f2a-4fb5-468a-836e-8095ae011b9c
-ceTaskUrl=https://literally-intense-population-tokyo.trycloudflare.com/api/ce/task?id=ce9e5f2a-4fb5-468a-836e-8095ae011b9c
