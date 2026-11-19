@@ -13,6 +13,8 @@ import {
 import { loadLocalConversations, saveLocalConversations } from '../lib/chatStorage';
 import { account, inbox, listConversations, rpc } from '../lib/core';
 import { getPreview, previewFromEvent, refreshPreviews } from '../lib/previews';
+import { requestNearbyPermissions } from '../lib/nearby';
+import { getRadarPeers, isRadarOn, onRadarChange, radarSupported, startRadar, stopRadar } from '../lib/radar';
 import { isStandby, loadStandby, setStandby } from '../lib/standby';
 import { AccountMenu } from '../components/AccountMenu';
 import { Avatar } from '../components/Avatar';
@@ -22,10 +24,11 @@ import { colors, themed, ui } from '../theme';
 
 interface Props {
   onOpen: (conversation: Conversation) => void;
+  onOpenNearby: () => void;
   onSignedOut: () => void;
 }
 
-export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
+export const ChatListScreen = ({ onOpen, onOpenNearby, onSignedOut }: Props) => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [query, setQuery] = useState('');
   const [found, setFound] = useState<FoundUser | null>(null);
@@ -46,6 +49,28 @@ export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
   useEffect(() => {
     loadStandby().then(setStandbyState).catch(() => undefined);
   }, []);
+
+  // Siaran Dekat: umumkan diri dan cari HP lain tanpa internet; sesama kontak tersambung otomatis
+  const [radarOn, setRadarOn] = useState(isRadarOn());
+  const [radarRequests, setRadarRequests] = useState(0);
+  useEffect(() => {
+    const sync = () => {
+      setRadarOn(isRadarOn());
+      setRadarRequests(getRadarPeers().filter(p => p.phase === 'incoming').length);
+    };
+    sync();
+    return onRadarChange(sync);
+  }, []);
+
+  const toggleRadar = async (on: boolean) => {
+    if (!on) {
+      await stopRadar();
+      return;
+    }
+    if (!radarSupported || !(await requestNearbyPermissions()) || !(await startRadar())) {
+      setError('Siaran Dekat tidak bisa dinyalakan: butuh Android dengan Google Play Services, izin Bluetooth, dan Bluetooth/Wi-Fi aktif');
+    }
+  };
 
   const toggleStandby = (on: boolean) => {
     setStandbyState(on);
@@ -195,6 +220,13 @@ export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
           {syncing ? <ActivityIndicator size="small" color={colors.accent} accessibilityLabel="Menyinkronkan" /> : null}
         </View>
         <View style={[ui.row, { gap: 6 }]}>
+          <Text style={[ui.muted, { fontSize: 12 }]}>Dekat</Text>
+          <Switch
+            value={radarOn}
+            onValueChange={value => void toggleRadar(value)}
+            trackColor={{ true: colors.accent, false: colors.border }}
+            accessibilityLabel="Siaran Dekat: umumkan diri dan cari orang di sekitar tanpa internet"
+          />
           <Text style={[ui.muted, { fontSize: 12 }]}>Standby</Text>
           <Switch
             value={standby}
@@ -207,6 +239,14 @@ export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
       </View>
 
       <UpdateBanner />
+
+      {radarOn ? (
+        <Pressable accessibilityRole="button" onPress={onOpenNearby} style={ui.notice}>
+          <Text style={{ color: colors.text }}>
+            Siaran Dekat aktif{radarRequests > 0 ? ` · ${radarRequests} permintaan baru` : ''}. Ketuk untuk melihat orang di sekitar.
+          </Text>
+        </Pressable>
+      ) : null}
 
       <View style={ui.row}>
         <TextInput

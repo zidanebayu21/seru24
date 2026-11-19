@@ -13,20 +13,18 @@ import {
 } from '../../../web/shared/file-core';
 import { Avatar } from '../components/Avatar';
 import { searchMessages } from '../../../web/shared/search-core';
-import { encodeNearbyAck, encodeNearbyMessage, nearbyAsMessage, nearbyTag, type NearbyWire } from '../../../web/shared/nearby-core';
+import { dropNearbyReceived, nearbyReceivedFor, requestNearbyPermissions } from '../lib/nearby';
 import {
-  dropNearbyReceived,
-  nearbyReceivedFor,
-  nearbySupported,
-  onNearbyState,
-  onNearbyWire,
-  requestNearbyPermissions,
-  saveNearbyReceived,
-  sendNearby,
-  startNearby,
-  stopNearby,
-  type NearbyState,
-} from '../lib/nearby';
+  isRadarOn,
+  onRadarAck,
+  onRadarChange,
+  onRadarMessage,
+  radarSupported,
+  readyPeerFor,
+  sendContactMessage,
+  startRadar,
+  stopRadar,
+} from '../lib/radar';
 import { MAX_PINS, addPin, canPin, parsePins, pinsNewestFirst, pinsStorageKey, prunePins, removePin } from '../../../web/shared/pin-core';
 import {
   SCHEDULE_ERRORS,
@@ -104,14 +102,6 @@ const SAVED_NOTE = 'Tersimpan di Download/seru24';
 const QUEUED_NOTE = 'Menunggu sinyal, terkirim otomatis saat online';
 const DIRECT_NOTE = 'Dikirim langsung, tersimpan di server saat online';
 const DIRECT_ACK_NOTE = 'Diterima langsung, tersimpan di server saat online';
-const NEARBY_LABELS: Record<NearbyState, string> = {
-  off: '',
-  searching: 'mencari lawan bicara…',
-  connecting: 'menyambung…',
-  connected: 'tersambung langsung',
-  error: 'gagal, coba lagi',
-};
-
 /** Pesan antrean dalam bentuk ChatMessage agar bisa didekripsi dan ditampilkan seperti pesan lain. */
 const queuedAsMessage = (item: QueuedMessage, myId: string | null): ChatMessage => ({
   id: item.params.p_client_msg_id,
@@ -158,9 +148,9 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
   const [searchPool, setSearchPool] = useState<Bubble[]>([]);
   const [flashKey, setFlashKey] = useState('');
   // pesan tersemat: hanya penanda pesan yang disimpan di HP ini; hilang otomatis bila pesannya sudah tidak ada
-  // Mode Dekat: chat langsung antar HP tanpa internet (Bluetooth / Wi-Fi Direct); mati sendiri saat layar chat ditutup
-  const [nearbyOn, setNearbyOn] = useState(false);
-  const [nearbyState, setNearbyState] = useState<NearbyState>('off');
+  // Siaran Dekat: chat langsung antar HP tanpa internet; sesama kontak tersambung otomatis saat siaran menyala
+  const [radarOn, setRadarOn] = useState(isRadarOn());
+  const [peerNear, setPeerNear] = useState(false);
   const [pins, setPins] = useState<string[]>([]);
   const [pinsReady, setPinsReady] = useState(false);
   const [pinsOpen, setPinsOpen] = useState(false);
@@ -252,51 +242,42 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     return () => back.remove();
   }, [onBack]);
 
-  // Sesi Mode Dekat: mulai/berhenti mengikuti tombol, terima pesan dan ack dari lawan bicara
+  // Status siaran dan apakah lawan bicara ini sedang tersambung langsung
   useEffect(() => {
-    if (!nearbyOn) return;
-    const myId = account.me?.id ?? '';
-    const handleWire = async (wire: NearbyWire) => {
-      if (wire.t === 'ack') {
-        updateBubble(wire.id, { progress: DIRECT_ACK_NOTE });
-        return;
-      }
-      const message = nearbyAsMessage(wire.m, conversation.id, peerId);
-      // gagal dibuka = bukan dari lawan bicara ini atau data diubah (AES-GCM): dibuang tanpa ack
-      if ((await e2ee.decryptText(message, peerId)) === null) return;
-      await sendNearby(encodeNearbyAck(message.client_msg_id)).catch(() => undefined);
+    const sync = () => {
+      setRadarOn(isRadarOn());
+      setPeerNear(Boolean(readyPeerFor(peerId)?.trusted));
+    };
+    sync();
+    return onRadarChange(sync);
+  }, [peerId]);
+
+  // Pesan dan ack dari lawan bicara ini lewat Siaran Dekat (sudah didekripsi, disimpan, dan di-ack oleh radar)
+  useEffect(() => {
+    const offMessage = onRadarMessage(event => {
+      if (event.kind !== 'contact' || event.conversationId !== conversation.id) return;
+      const { message } = event;
       const known = allMessagesRef.current.some(m => m.client_msg_id === message.client_msg_id)
         || bubblesRef.current.some(b => b.key === message.client_msg_id)
         || deletedIdsRef.current.has(message.client_msg_id);
       if (known) return;
-      await saveNearbyReceived(message);
-      const bubble = await toBubble(message);
-      updateBubbles(list => mergePagedBubbles([bubble], list));
-    };
-    const offState = onNearbyState(setNearbyState);
-    const offWire = onNearbyWire(wire => {
-      handleWire(wire).catch(() => undefined);
+      toBubble(message).then(bubble => updateBubbles(list => mergePagedBubbles([bubble], list))).catch(() => undefined);
     });
-    startNearby(nearbyTag(conversation.id, myId), nearbyTag(conversation.id, peerId)).catch(() => {
-      setNearbyOn(false);
-      setError('Mode Dekat gagal dimulai. Pastikan Bluetooth/Wi-Fi aktif dan Google Play Services tersedia');
-    });
+    const offAck = onRadarAck(clientMsgId => updateBubble(clientMsgId, { progress: DIRECT_ACK_NOTE }));
     return () => {
-      offState();
-      offWire();
-      setNearbyState('off');
-      stopNearby().catch(() => undefined);
+      offMessage();
+      offAck();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nearbyOn, conversation.id, peerId, toBubble]);
+  }, [conversation.id, toBubble]);
 
   // Baru tersambung: kirim pesan yang sudah mengantre sebelum tersambung (penerima membuang duplikat dan membalas ack)
   useEffect(() => {
-    if (nearbyState !== 'connected') return;
+    if (!peerNear) return;
     void queuedFor(conversation.id).then(items => {
-      for (const item of items) sendNearby(encodeNearbyMessage(item.params, item.queuedAt)).catch(() => undefined);
+      for (const item of items) sendContactMessage(peerId, item.params, item.queuedAt).catch(() => undefined);
     });
-  }, [nearbyState, conversation.id]);
+  }, [peerNear, conversation.id, peerId]);
 
   const togglePin = (item: Bubble) => {
     const next = pins.includes(item.key) ? removePin(pins, item.key) : addPin(pins, item.key);
@@ -482,6 +463,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
       presenceRef.current?.close();
       presenceRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversation.id, peerId, toBubble, markRead, updateBubbles]);
 
   useEffect(() => onQueuedSent(async (item, result) => {
@@ -604,7 +586,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         const queuedAt = new Date().toISOString();
         await queueMessage({ conversationId: conversation.id, params, queuedAt });
         // Mode Dekat tersambung: kirim juga langsung ke HP lawan bicara; salinan server menyusul lewat antrean
-        const direct = nearbyState === 'connected' && (await sendNearby(encodeNearbyMessage(params, queuedAt)).then(() => true, () => false));
+        const direct = peerNear && (await sendContactMessage(peerId, params, queuedAt));
         updateBubble(params.p_client_msg_id, { progress: direct ? DIRECT_NOTE : QUEUED_NOTE });
         return;
       }
@@ -917,21 +899,21 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     }
   };
 
-  const toggleNearby = async () => {
-    if (nearbyOn) {
-      setNearbyOn(false);
+  const toggleRadar = async () => {
+    if (radarOn) {
+      await stopRadar();
       return;
     }
-    if (!nearbySupported) {
-      setError('Mode Dekat hanya tersedia di Android dengan Google Play Services');
+    if (!radarSupported) {
+      setError('Siaran Dekat hanya tersedia di Android dengan Google Play Services');
       return;
     }
     if (!(await requestNearbyPermissions())) {
-      setError('Mode Dekat butuh izin Bluetooth dan perangkat di sekitar');
+      setError('Siaran Dekat butuh izin Bluetooth dan perangkat di sekitar');
       return;
     }
     setError('');
-    setNearbyOn(true);
+    if (!(await startRadar())) setError('Siaran Dekat gagal dimulai. Pastikan Bluetooth/Wi-Fi aktif dan Google Play Services tersedia');
   };
 
   /** Tekan lama pada gelembung: balas, atau hapus (pesan sendiri). Pesan yang belum punya id server (seq 0) tidak bisa. */
@@ -940,8 +922,8 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     setActionsFor(item);
   };
 
-  const subtitle = nearbyOn
-    ? `Mode Dekat · ${NEARBY_LABELS[nearbyState]}`
+  const subtitle = peerNear
+    ? 'tersambung langsung · tanpa internet'
     : peerPresence.typing
     ? 'sedang mengetik…'
     : `@${conversation.peer_username} · ${peerPresence.online ? 'online' : 'terenkripsi end-to-end'}`;
@@ -1049,8 +1031,8 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
       ) : null}
       <PopupMenu open={menuOpen} onClose={() => setMenuOpen(false)}>
         <MenuItem
-          label={nearbyOn ? 'Matikan Mode Dekat' : 'Mode Dekat (tanpa internet)'}
-          onPress={() => closeMenuThen(toggleNearby)}
+          label={radarOn ? 'Matikan Siaran Dekat' : 'Nyalakan Siaran Dekat (tanpa internet)'}
+          onPress={() => closeMenuThen(toggleRadar)}
         />
         <MenuItem label="Hapus riwayat chat di HP ini" onPress={() => closeMenuThen(confirmClearChat)} />
         <MenuItem
@@ -1132,7 +1114,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
               <ActivityIndicator size="small" color={colors.accent} />
               <Text style={ui.muted}>{preparing ? 'Membuka kunci chat…' : 'Memuat pesan lama…'}</Text>
             </View>
-          ) : null
+          ) : undefined
         }
         renderItem={({ item, index }) => (
           <View>

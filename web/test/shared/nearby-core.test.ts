@@ -3,11 +3,18 @@ import {
   NEARBY_INBOX_LIMIT,
   addToNearbyInbox,
   clampCreatedAt,
+  buildEndpointName,
+  contactTag,
   encodeNearbyAck,
+  encodeNearbyHello,
   encodeNearbyMessage,
+  matchContact,
   nearbyAsMessage,
-  nearbyTag,
+  parseEndpointName,
   parseNearbyWire,
+  randomAlias,
+  shouldInitiate,
+  strangerConversationId,
 } from '../../shared/nearby-core'
 import type { ChatMessage } from '../../shared/e2ee-core'
 
@@ -20,13 +27,64 @@ const params = {
   p_reply_to: null,
 }
 
-describe('nearbyTag', () => {
-  it('stabil, pendek, dan berbeda per akun dan percakapan', () => {
-    const tag = nearbyTag('conv', 'u1')
-    expect(tag).toMatch(/^[0-9a-f]{16}$/)
-    expect(nearbyTag('conv', 'u1')).toBe(tag)
-    expect(nearbyTag('conv', 'u2')).not.toBe(tag)
-    expect(nearbyTag('conv2', 'u1')).not.toBe(tag)
+describe('nama siaran', () => {
+  const tag = contactTag('conv', 'u1')
+
+  it('alias acak tidak memuat username dan berbentuk tetap', () => {
+    expect(randomAlias(new Uint8Array([0x4f, 0x2a, 1, 2]))).toBe('Anonim-4F2A')
+  })
+
+  it('tag kontak stabil, 8 hex, dan berbeda per akun dan percakapan', () => {
+    expect(tag).toMatch(/^[0-9a-f]{8}$/)
+    expect(contactTag('conv', 'u1')).toBe(tag)
+    expect(contactTag('conv', 'u2')).not.toBe(tag)
+    expect(contactTag('conv2', 'u1')).not.toBe(tag)
+  })
+
+  it('bolak-balik dan memangkas tag agar muat di batas nama', () => {
+    const name = { alias: 'Anonim-4F2A', id: 'aabbccdd', tags: [tag] }
+    expect(parseEndpointName(buildEndpointName(name))).toEqual(name)
+    const many = Array.from({ length: 30 }, (_, i) => contactTag('c', `u${i}`))
+    const built = buildEndpointName({ ...name, tags: many })
+    expect(built.length).toBeLessThanOrEqual(100)
+    expect(parseEndpointName(built)!.tags.length).toBeGreaterThan(0)
+  })
+
+  it.each(['', 'x|y', 's1|Anonim-4F2A|aabbccdd', 's1|budi|aabbccdd|', 's1|Anonim-4F2A|zz|', 's1|Anonim-4F2A|aabbccdd|nothex'])(
+    'menolak nama tidak sah %j',
+    (raw) => {
+      expect(parseEndpointName(raw)).toBeNull()
+    },
+  )
+
+  it('mengenali kontak dari tag, orang asing tidak cocok', () => {
+    const contacts = [{ conversationId: 'conv', peerId: 'u1' }]
+    expect(matchContact([tag], contacts)).toEqual(contacts[0])
+    expect(matchContact([contactTag('lain', 'u9')], contacts)).toBeNull()
+    expect(matchContact([], contacts)).toBeNull()
+  })
+
+  it('hanya satu pihak yang memulai dan id percakapan sementara tidak bergantung urutan', () => {
+    expect(shouldInitiate('aaaa', 'bbbb')).toBe(true)
+    expect(shouldInitiate('bbbb', 'aaaa')).toBe(false)
+    expect(strangerConversationId('u1', 'u2')).toBe(strangerConversationId('u2', 'u1'))
+  })
+})
+
+describe('hello', () => {
+  const hello = { u: 'user-1', n: 'budi_1', k: 1, pk: `${'A'.repeat(43)}=` }
+
+  it('bolak-balik utuh', () => {
+    expect(parseNearbyWire(encodeNearbyHello(hello))).toEqual({ t: 'hello', h: hello })
+  })
+
+  it.each([
+    ['username tidak sah', { ...hello, n: 'Budi!' }],
+    ['kunci bukan 32 byte', { ...hello, pk: 'QUJD' }],
+    ['versi kunci 0', { ...hello, k: 0 }],
+    ['tanpa id', { ...hello, u: '' }],
+  ])('menolak %s', (_name, h) => {
+    expect(parseNearbyWire(JSON.stringify({ t: 'hello', h }))).toBeNull()
   })
 })
 

@@ -5,14 +5,18 @@ import type { Conversation } from '../../web/shared/chat-core';
 import { loadCachedAccount, restoreSession, setRealtimeActive, type RestoreStatus } from './lib/core';
 import { isStandby, loadStandby } from './lib/standby';
 import { flushOutbox } from './lib/outbox';
+import { stopRadar } from './lib/radar';
+import { syncStrangers } from './lib/strangers';
 import { loadNotifySetting, startNotifications, stopNotifications, updateNotificationPresence } from './lib/notify';
 import { AuthScreen } from './screens/AuthScreen';
 import { ChatListScreen } from './screens/ChatListScreen';
 import { ChatScreen } from './screens/ChatScreen';
+import { NearbyChatScreen } from './screens/NearbyChatScreen';
+import { NearbyScreen } from './screens/NearbyScreen';
 import { colors, isDarkMode, loadTheme, onThemeChange, themeVersion, ui } from './theme';
 
 // boot = membaca profil tersimpan (sekejap, layar kosong); loading = belum pernah masuk di perangkat ini
-type Screen = { name: 'boot' } | { name: 'loading' } | { name: 'auth' } | { name: 'list' } | { name: 'chat'; conversation: Conversation };
+type Screen = { name: 'boot' } | { name: 'loading' } | { name: 'auth' } | { name: 'list' } | { name: 'chat'; conversation: Conversation } | { name: 'nearby' } | { name: 'nearbyChat'; userId: string };
 
 const RETRY_MS = 15_000;
 
@@ -20,7 +24,12 @@ const App = () => {
   const [screen, setScreen] = useState<Screen>({ name: 'boot' });
   const activeConversation = useRef<string | null>(null);
   const [themeTick, setThemeTick] = useState(0);
-  const signedIn = screen.name === 'list' || screen.name === 'chat';
+  const signedIn = screen.name === 'list' || screen.name === 'chat' || screen.name === 'nearby' || screen.name === 'nearbyChat';
+
+  // keluar dari akun: siaran dekat ikut berhenti
+  useEffect(() => {
+    if (!signedIn) void stopRadar();
+  }, [signedIn]);
 
   // Daftar chat dari cache lokal tampil seketika; sesi dan kunci dipulihkan di belakang.
   // 'offline' = sinyal belum ada: tetap di daftar (cache), dicoba lagi berkala dan saat app dibuka kembali.
@@ -39,7 +48,10 @@ const App = () => {
         if (status !== 'ready') return { name: 'auth' };
         return current.name === 'loading' || current.name === 'boot' ? { name: 'list' } : current;
       });
-      if (status === 'ready') flushOutbox().catch(() => undefined);
+      if (status === 'ready') {
+        flushOutbox().catch(() => undefined);
+        syncStrangers().catch(() => undefined);
+      }
     };
 
     loadTheme()
@@ -56,7 +68,10 @@ const App = () => {
     const sub = AppState.addEventListener('change', state => {
       // mode standby: koneksi realtime tidak diputus di latar belakang
       setRealtimeActive(state === 'active' || isStandby());
-      if (state === 'active') flushOutbox().catch(() => undefined);
+      if (state === 'active') {
+        flushOutbox().catch(() => undefined);
+        syncStrangers().catch(() => undefined);
+      }
     });
     return () => {
       cancelled = true;
@@ -101,9 +116,20 @@ const App = () => {
         return (
           <ChatListScreen
             onOpen={conversation => setScreen({ name: 'chat', conversation })}
+            onOpenNearby={() => setScreen({ name: 'nearby' })}
             onSignedOut={() => setScreen({ name: 'auth' })}
           />
         );
+      case 'nearby':
+        return (
+          <NearbyScreen
+            onBack={() => setScreen({ name: 'list' })}
+            onOpenStranger={userId => setScreen({ name: 'nearbyChat', userId })}
+            onOpenContact={conversation => setScreen({ name: 'chat', conversation })}
+          />
+        );
+      case 'nearbyChat':
+        return <NearbyChatScreen userId={screen.userId} onBack={() => setScreen({ name: 'nearby' })} />;
       case 'chat':
         return <ChatScreen conversation={screen.conversation} onBack={() => setScreen({ name: 'list' })} />;
     }
@@ -111,7 +137,7 @@ const App = () => {
 
   return (
     <SafeAreaProvider>
-      <StatusBar barStyle={isDarkMode() ? 'light-content' : 'dark-content'} backgroundColor={colors.bg} />
+      <StatusBar barStyle={isDarkMode() ? 'light-content' : 'dark-content'} {...{ backgroundColor: colors.bg }} />
       {/* key: layar dipasang ulang saat tema berganti agar gaya memakai warna baru */}
       <SafeAreaView key={themeTick} style={ui.screen}>{content()}</SafeAreaView>
     </SafeAreaProvider>

@@ -9,6 +9,7 @@ import {
   fromBase64,
   randomId,
   safetyCode,
+  toBase64,
   type MessageKind,
   type SecretKeyring,
 } from './crypto'
@@ -39,6 +40,11 @@ interface PublicKeyRow {
   revoked: boolean
 }
 
+/** Kunci publik lawan yang diterima langsung (Mode Dekat), belum dicocokkan dengan server. */
+export type PeerKeyOverride = PublicKeyRow
+
+export type PeerKeyCheck = 'match' | 'mismatch' | 'unknown'
+
 export type PeerKeyStatus = { status: 'missing' } | { status: 'ok' | 'changed'; code: string }
 
 /** Penyimpanan kunci publik lawan yang pernah dilihat (trust on first use). */
@@ -54,6 +60,13 @@ export interface E2eeDeps {
   tofu: TofuStore
   /** Opsional: simpan kunci publik lawan di perangkat agar pesan tetap terbaca/terkirim saat offline. */
   publicKeyCache?: TofuStore
+}
+
+interface SealExtra {
+  /** Pakai ulang id pesan (menyegel ulang pesan Mode Dekat dengan id percakapan server). */
+  clientMsgId?: string
+  /** Kunci publik lawan dari handshake Mode Dekat (tanpa server). */
+  peerKey?: PeerKeyOverride
 }
 
 export const createE2ee = (deps: E2eeDeps) => {
@@ -88,14 +101,20 @@ export const createE2ee = (deps: E2eeDeps) => {
     (await fetchPublicKeys(userId)).find((r) => r.key_version === version)
     ?? (await fetchPublicKeys(userId, true)).find((r) => r.key_version === version)
 
-  const conversationKey = async (conversationId: string, peerId: string, myVersion: number, peerVersion: number) => {
-    const cacheKey = `${conversationId}|${myVersion}|${peerVersion}`
+  const conversationKey = async (
+    conversationId: string,
+    peerId: string,
+    myVersion: number,
+    peerVersion: number,
+    override?: PeerKeyOverride,
+  ) => {
+    const cacheKey = `${conversationId}|${myVersion}|${peerVersion}|${override?.public_key ?? ''}`
     const cached = conversationKeys.get(cacheKey)
     if (cached) return cached
 
     const me = deps.getMe()
     const secret = deps.getKeyring()?.[String(myVersion)]
-    const peerKey = await findKey(peerId, peerVersion)
+    const peerKey = override?.key_version === peerVersion ? override : await findKey(peerId, peerVersion)
     if (!secret || !peerKey || !me) throw new Error('Kunci tidak tersedia')
 
     const key = deriveConversationKey(secret, fromBase64(peerKey.public_key), conversationId,
@@ -104,14 +123,21 @@ export const createE2ee = (deps: E2eeDeps) => {
     return key
   }
 
-  const seal = async (conversationId: string, peerId: string, kind: MessageKind, body: unknown, refreshPeer: boolean) => {
+  const seal = async (
+    conversationId: string,
+    peerId: string,
+    kind: MessageKind,
+    body: unknown,
+    refreshPeer: boolean,
+    extra?: SealExtra,
+  ) => {
     const me = deps.getMe()
     if (!me?.key_version) throw new Error('Kunci belum siap')
-    const peer = latestKey(await fetchPublicKeys(peerId, refreshPeer))
+    const peer = extra?.peerKey ?? latestKey(await fetchPublicKeys(peerId, refreshPeer))
     if (!peer) throw new Error('Lawan bicara belum menyiapkan kunci enkripsi')
 
-    const clientMsgId = randomId()
-    const key = await conversationKey(conversationId, peerId, me.key_version, peer.key_version)
+    const clientMsgId = extra?.clientMsgId ?? randomId()
+    const key = await conversationKey(conversationId, peerId, me.key_version, peer.key_version, extra?.peerKey)
     const sealed = encryptMessage(key, body, { conversationId, senderId: me.id, clientMsgId, kind })
     return {
       p_conversation_id: conversationId,
@@ -125,9 +151,9 @@ export const createE2ee = (deps: E2eeDeps) => {
   }
 
   /** Parameter siap kirim ke RPC seru24_send_message. */
-  const encryptText = async (conversationId: string, peerId: string, text: string, refreshPeer = false) => {
+  const encryptText = async (conversationId: string, peerId: string, text: string, refreshPeer = false, extra?: SealExtra) => {
     if (text.length > MAX_TEXT_LENGTH) throw new Error(`Maksimal ${MAX_TEXT_LENGTH} karakter`)
-    return seal(conversationId, peerId, 'text', { t: text }, refreshPeer)
+    return seal(conversationId, peerId, 'text', { t: text }, refreshPeer, extra)
   }
 
   /** Pesan dokumen: metadata dan kunci file ikut terenkripsi E2EE; server hanya melihat attachment_id. */
@@ -137,14 +163,14 @@ export const createE2ee = (deps: E2eeDeps) => {
   })
 
   /** Isi pesan yang sudah dibuka; null = dihapus, kedaluwarsa, atau gagal dibuka (kunci salah / data diubah). */
-  const openBody = async (message: ChatMessage, peerId: string): Promise<{ t?: unknown; f?: unknown } | null> => {
+  const openBody = async (message: ChatMessage, peerId: string, peerKey?: PeerKeyOverride): Promise<{ t?: unknown; f?: unknown } | null> => {
     const me = deps.getMe()
     if (message.deleted_at || !message.ciphertext || !message.nonce || !me) return null
     const mine = message.sender_id === me.id
     const myVersion = mine ? message.sender_key_version : message.recipient_key_version
     const peerVersion = mine ? message.recipient_key_version : message.sender_key_version
     try {
-      const key = await conversationKey(message.conversation_id, peerId, myVersion, peerVersion)
+      const key = await conversationKey(message.conversation_id, peerId, myVersion, peerVersion, peerKey)
       return decryptMessage<{ t?: unknown; f?: unknown }>(
         key,
         { ciphertext: message.ciphertext, nonce: message.nonce },
@@ -156,8 +182,8 @@ export const createE2ee = (deps: E2eeDeps) => {
   }
 
   /** Teks pesan; pesan dokumen tampil sebagai "📎 nama" untuk klien yang belum bisa membuka dokumen. */
-  const decryptText = async (message: ChatMessage, peerId: string): Promise<string | null> => {
-    const body = await openBody(message, peerId)
+  const decryptText = async (message: ChatMessage, peerId: string, peerKey?: PeerKeyOverride): Promise<string | null> => {
+    const body = await openBody(message, peerId, peerKey)
     if (typeof body?.t === 'string') return body.t.slice(0, MAX_TEXT_LENGTH)
     const file = parseFileBody(body?.f)
     return file ? `📎 ${file.name}` : null
@@ -188,5 +214,27 @@ export const createE2ee = (deps: E2eeDeps) => {
     if (peer) await deps.tofu.set(tofuKey(peerId), peer.public_key)
   }
 
-  return { resetE2ee, encryptText, encryptFile, decryptText, decryptFile, checkPeerKey, acceptPeerKey }
+  /** Kunci publik akun ini (untuk handshake Mode Dekat); null bila kunci belum siap. */
+  const myPublicKey = (): { user_id: string; key_version: number; public_key: string } | null => {
+    const me = deps.getMe()
+    const version = me?.key_version
+    const secret = version ? deps.getKeyring()?.[String(version)] : undefined
+    return me && version && secret ? { user_id: me.id, key_version: version, public_key: toBase64(x25519.getPublicKey(secret)) } : null
+  }
+
+  /** Cocokkan kunci yang diklaim lawan dengan kunci server/cache perangkat; 'unknown' bila belum pernah terlihat. */
+  const checkClaimedKey = async (userId: string, claimed: PeerKeyOverride): Promise<PeerKeyCheck> => {
+    const rows = await fetchPublicKeys(userId).catch(() => null)
+    const known = rows?.find((r) => r.key_version === claimed.key_version)
+    if (!known) return 'unknown'
+    return known.public_key === claimed.public_key && !known.revoked ? 'match' : 'mismatch'
+  }
+
+  /** Kode keamanan untuk dicocokkan lisan dengan lawan bicara (kunci milik kita dan kunci yang diklaim lawan). */
+  const claimedSafetyCode = (claimed: PeerKeyOverride): string | null => {
+    const mine = myPublicKey()
+    return mine ? safetyCode(fromBase64(mine.public_key), fromBase64(claimed.public_key)) : null
+  }
+
+  return { myPublicKey, checkClaimedKey, claimedSafetyCode, resetE2ee, encryptText, encryptFile, decryptText, decryptFile, checkPeerKey, acceptPeerKey }
 }

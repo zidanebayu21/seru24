@@ -1,17 +1,19 @@
 import { DeviceEventEmitter, NativeModules, PermissionsAndroid, Platform, type Permission } from 'react-native';
-import { addToNearbyInbox, parseNearbyWire, type NearbyWire } from '../../../web/shared/nearby-core';
+import { addToNearbyInbox } from '../../../web/shared/nearby-core';
 import type { ChatMessage } from '../../../web/shared/e2ee-core';
 import { account, readSetting, writeSetting } from './core';
 
-// Mode Dekat: chat langsung antar HP tanpa internet (Nearby Connections, Android). Hanya amplop ciphertext E2EE yang
-// lewat; modul native cuma mengangkut byte. Pesan yang diterima disimpan (Keystore HP) sampai server mengirim
-// salinan yang sama (client_msg_id sama), lalu digantikan oleh salinan server.
-
-export type NearbyState = 'off' | 'searching' | 'connecting' | 'connected' | 'error';
+// Siaran Dekat: transport Nearby Connections (Android) dan kotak masuk pesan kontak yang diterima langsung. Modul native
+// hanya mengangkut byte; logika siapa boleh tersambung ada di radar.ts. Pesan kontak yang diterima disimpan (Keystore HP)
+// sampai server mengirim salinan yang sama (client_msg_id sama), lalu digantikan oleh salinan server.
 
 interface NativeNearbyModule {
-  start: (localTag: string, peerTag: string) => Promise<void>;
-  send: (json: string) => Promise<void>;
+  start: (name: string) => Promise<void>;
+  request: (endpointId: string) => Promise<void>;
+  acceptEndpoint: (endpointId: string) => void;
+  rejectEndpoint: (endpointId: string) => void;
+  disconnect: (endpointId: string) => void;
+  send: (endpointId: string, json: string) => Promise<void>;
   stop: () => Promise<void>;
 }
 
@@ -19,6 +21,12 @@ const EVENT = 'seru24NearbyEvent';
 const native = NativeModules.Seru24Nearby as NativeNearbyModule | undefined;
 
 export const nearbySupported = Platform.OS === 'android' && Boolean(native);
+
+export interface NearbyEvent {
+  type: 'found' | 'lost' | 'incoming' | 'connected' | 'failed' | 'disconnected' | 'payload' | 'state';
+  id: string;
+  value: string;
+}
 
 /** Izin runtime menurut versi Android: Bluetooth baru sejak 12 (API 31), Wi-Fi sekitar sejak 13 (API 33). */
 const requiredPermissions = (): Permission[] => {
@@ -36,29 +44,20 @@ export const requestNearbyPermissions = async (): Promise<boolean> => {
   return Object.values(result).every(value => value === PermissionsAndroid.RESULTS.GRANTED);
 };
 
-export const startNearby = (localTag: string, peerTag: string) => native!.start(localTag, peerTag);
+export const startNearby = (name: string) => native!.start(name);
 export const stopNearby = () => native?.stop().catch(() => undefined) ?? Promise.resolve();
-export const sendNearby = (json: string) => native!.send(json);
+export const requestNearby = (endpointId: string) => native!.request(endpointId);
+export const acceptNearby = (endpointId: string) => native?.acceptEndpoint(endpointId);
+export const rejectNearby = (endpointId: string) => native?.rejectEndpoint(endpointId);
+export const disconnectNearby = (endpointId: string) => native?.disconnect(endpointId);
+export const sendNearby = (endpointId: string, json: string) => native!.send(endpointId, json);
 
-type NativeEvent = { type: 'state' | 'payload'; value: string };
-
-export const onNearbyState = (listener: (state: NearbyState) => void) => {
-  const sub = DeviceEventEmitter.addListener(EVENT, (event: NativeEvent) => {
-    if (event.type === 'state') listener(event.value as NearbyState);
-  });
+export const onNearbyEvent = (listener: (event: NearbyEvent) => void) => {
+  const sub = DeviceEventEmitter.addListener(EVENT, listener);
   return () => sub.remove();
 };
 
-export const onNearbyWire = (listener: (wire: NearbyWire) => void) => {
-  const sub = DeviceEventEmitter.addListener(EVENT, (event: NativeEvent) => {
-    if (event.type !== 'payload') return;
-    const wire = parseNearbyWire(event.value);
-    if (wire) listener(wire);
-  });
-  return () => sub.remove();
-};
-
-// ---- kotak masuk: pesan yang diterima langsung dan belum ada di server ----
+// ---- kotak masuk: pesan kontak yang diterima langsung dan belum ada di server ----
 const inboxKey = () => `nearbyInbox.${account.me?.id ?? ''}`;
 
 const loadInbox = async (): Promise<ChatMessage[]> => {

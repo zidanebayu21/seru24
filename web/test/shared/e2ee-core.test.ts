@@ -166,4 +166,54 @@ describe('e2ee-core', () => {
 
     e2ee.resetE2ee()
   })
+
+  describe('Siaran Dekat (kunci dari handshake, tanpa server)', () => {
+    /** E2EE tanpa server: semua panggilan rpc gagal seperti saat offline. */
+    const offlineE2ee = (userId: 'alice' | 'bob') => {
+      const isAlice = userId === 'alice'
+      return createE2ee({
+        rpc: vi.fn(async () => { throw new TypeError('offline') }),
+        getKeyring: () => (isAlice ? aliceKeyring : bobKeyring),
+        getMe: () => (isAlice ? aliceMe : bobMe),
+        tofu: { get: async () => null, set: async () => undefined },
+      })
+    }
+    const claimed = (pair: { publicKey: Uint8Array }) => ({ key_version: 1, public_key: toBase64(pair.publicKey), revoked: false })
+
+    it('kunci publik sendiri dibagikan untuk handshake', () => {
+      expect(makeE2ee('alice').myPublicKey()).toEqual({ user_id: 'alice', key_version: 1, public_key: toBase64(alicePair.publicKey) })
+    })
+
+    it('pesan disegel dan dibuka dengan kunci dari handshake, id percakapan sementara, dan client_msg_id yang dipakai ulang', async () => {
+      const alice = offlineE2ee('alice')
+      const bob = offlineE2ee('bob')
+      const sealed = await alice.encryptText('radar:alice:bob', 'bob', 'Halo, kita belum kenal', false, {
+        peerKey: claimed(bobPair),
+        clientMsgId: 'id-tetap',
+      })
+      expect(sealed.p_client_msg_id).toBe('id-tetap')
+      const message: ChatMessage = {
+        id: 'id-tetap', conversation_id: 'radar:alice:bob', sender_id: 'alice', seq: 0, client_msg_id: 'id-tetap', kind: 'text',
+        ciphertext: sealed.p_ciphertext, nonce: sealed.p_nonce, sender_key_version: 1, recipient_key_version: 1, reply_to: null,
+        created_at: '2026-11-19T10:00:00Z', edited_at: null, deleted_at: null, expires_at: null,
+      }
+      expect(await bob.decryptText(message, 'alice', claimed(alicePair))).toBe('Halo, kita belum kenal')
+      // tanpa kunci dari handshake dan tanpa server, pesan tidak bisa dibuka
+      expect(await bob.decryptText(message, 'alice')).toBeNull()
+      // kunci yang diklaim palsu tidak membuka pesan
+      expect(await bob.decryptText(message, 'alice', claimed(generateKeyPair()))).toBeNull()
+    })
+
+    it('mencocokkan kunci yang diklaim dengan kunci di server', async () => {
+      const e2ee = makeE2ee('alice')
+      expect(await e2ee.checkClaimedKey('bob', claimed(bobPair))).toBe('match')
+      expect(await e2ee.checkClaimedKey('bob', claimed(generateKeyPair()))).toBe('mismatch')
+      expect(await e2ee.checkClaimedKey('orang-baru', claimed(bobPair))).toBe('unknown')
+      expect(await offlineE2ee('alice').checkClaimedKey('bob', claimed(bobPair))).toBe('unknown')
+    })
+
+    it('kode keamanan sama di kedua sisi', () => {
+      expect(makeE2ee('alice').claimedSafetyCode(claimed(bobPair))).toBe(makeE2ee('bob').claimedSafetyCode(claimed(alicePair)))
+    })
+  })
 })

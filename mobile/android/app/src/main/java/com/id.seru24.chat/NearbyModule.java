@@ -24,24 +24,26 @@ import com.google.android.gms.nearby.connection.PayloadTransferUpdate;
 import com.google.android.gms.nearby.connection.Strategy;
 
 import java.nio.charset.StandardCharsets;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
- * Mode Dekat: koneksi langsung antar dua HP tanpa internet memakai Nearby Connections (BLE untuk menemukan, lalu
- * Bluetooth atau Wi-Fi Direct untuk data). Satu sesi hanya untuk satu lawan bicara: nama yang diumumkan adalah tag
- * turunan (bukan username) dan koneksi dari nama lain ditolak. Modul ini hanya mengangkut byte; keaslian dan isi
- * pesan diperiksa di sisi JS lewat dekripsi AES-GCM E2EE. Payload hanya BYTES (maks 32 KB), tanpa file.
+ * Siaran Dekat: mengumumkan diri dan mencari HP lain tanpa internet memakai Nearby Connections (BLE untuk menemukan,
+ * Bluetooth atau Wi-Fi Direct untuk data). Modul ini hanya mengangkut byte dan melaporkan kejadian ke JS; siapa yang
+ * dihubungi, diterima, atau ditolak diputuskan JS. Nama yang diumumkan dibuat JS (alias acak, bukan username). Payload
+ * hanya BYTES (maks 32 KB), tanpa file. Jumlah koneksi dibatasi agar perangkat asing tidak bisa membanjiri.
  */
 public class NearbyModule extends ReactContextBaseJavaModule {
     private static final String EVENT = "seru24NearbyEvent";
-    private static final String SERVICE_ID = "id.seru24.chat.nearby";
-    private static final Strategy STRATEGY = Strategy.P2P_POINT_TO_POINT;
+    private static final String SERVICE_ID = "id.seru24.chat.radar";
+    private static final Strategy STRATEGY = Strategy.P2P_CLUSTER;
+    private static final int MAX_LINKS = 6;
 
     private ConnectionsClient client;
     private boolean active;
-    private String localTag;
-    private String peerTag;
-    private String endpointId;
-    private boolean connecting;
+    private String localName;
+    private final Set<String> connected = new HashSet<>();
+    private final Set<String> pending = new HashSet<>();
 
     NearbyModule(ReactApplicationContext context) {
         super(context);
@@ -58,14 +60,15 @@ public class NearbyModule extends ReactContextBaseJavaModule {
         return client;
     }
 
-    private void emit(String type, String value) {
+    private void emit(String type, String id, String value) {
         WritableMap map = Arguments.createMap();
         map.putString("type", type);
+        map.putString("id", id);
         map.putString("value", value);
         try {
             getReactApplicationContext().getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class).emit(EVENT, map);
         } catch (RuntimeException ignored) {
-            // JS belum siap atau sedang dimuat ulang: status dikirim ulang pada kejadian berikutnya
+            // JS belum siap atau sedang dimuat ulang: kejadian berikutnya akan menyusul
         }
     }
 
@@ -73,8 +76,8 @@ public class NearbyModule extends ReactContextBaseJavaModule {
         @Override
         public void onPayloadReceived(@NonNull String id, @NonNull Payload payload) {
             byte[] bytes = payload.asBytes();
-            if (!id.equals(endpointId) || payload.getType() != Payload.Type.BYTES || bytes == null) return;
-            emit("payload", new String(bytes, StandardCharsets.UTF_8));
+            if (!connected.contains(id) || payload.getType() != Payload.Type.BYTES || bytes == null) return;
+            emit("payload", id, new String(bytes, StandardCharsets.UTF_8));
         }
 
         @Override
@@ -86,97 +89,113 @@ public class NearbyModule extends ReactContextBaseJavaModule {
     private final ConnectionLifecycleCallback lifecycle = new ConnectionLifecycleCallback() {
         @Override
         public void onConnectionInitiated(@NonNull String id, @NonNull ConnectionInfo info) {
-            // hanya lawan bicara percakapan ini; selain itu ditolak sebelum ada data yang diterima
-            if (!active || endpointId != null || !info.getEndpointName().equals(peerTag)) {
+            if (!active || connected.size() + pending.size() >= MAX_LINKS) {
                 client().rejectConnection(id);
                 return;
             }
-            connecting = true;
-            emit("state", "connecting");
-            client().acceptConnection(id, payloadCallback);
+            pending.add(id);
+            // JS memutuskan terima atau tolak (acceptEndpoint / rejectEndpoint)
+            emit("incoming", id, info.getEndpointName() + "\n" + info.getAuthenticationDigits());
         }
 
         @Override
         public void onConnectionResult(@NonNull String id, @NonNull ConnectionResolution result) {
-            connecting = false;
+            pending.remove(id);
             if (active && result.getStatus().isSuccess()) {
-                endpointId = id;
-                // hemat baterai: berhenti mencari selama sudah tersambung
-                client().stopAdvertising();
-                client().stopDiscovery();
-                emit("state", "connected");
-            } else if (active) {
-                emit("state", "searching");
+                connected.add(id);
+                emit("connected", id, "");
+            } else {
+                emit("failed", id, "");
             }
         }
 
         @Override
         public void onDisconnected(@NonNull String id) {
-            if (!id.equals(endpointId)) return;
-            endpointId = null;
-            if (active) {
-                emit("state", "searching");
-                beginSearch(null);
-            }
+            pending.remove(id);
+            if (connected.remove(id)) emit("disconnected", id, "");
         }
     };
 
     private final EndpointDiscoveryCallback discovery = new EndpointDiscoveryCallback() {
         @Override
         public void onEndpointFound(@NonNull String id, @NonNull DiscoveredEndpointInfo info) {
-            // Hanya satu pihak yang meminta koneksi (tag lebih kecil) agar tidak bentrok; pihak lain menunggu.
-            if (!active || endpointId != null || connecting) return;
-            if (!info.getEndpointName().equals(peerTag) || localTag.compareTo(peerTag) >= 0) return;
-            client().requestConnection(localTag, id, lifecycle);
+            emit("found", id, info.getEndpointName());
         }
 
         @Override
         public void onEndpointLost(@NonNull String id) {
-            // dicari ulang otomatis saat perangkat terlihat lagi
+            emit("lost", id, "");
         }
     };
 
-    private void beginSearch(Promise promise) {
-        client().startAdvertising(localTag, SERVICE_ID, lifecycle, new AdvertisingOptions.Builder().setStrategy(STRATEGY).build())
-            .addOnSuccessListener(unused -> client().startDiscovery(SERVICE_ID, discovery, new DiscoveryOptions.Builder().setStrategy(STRATEGY).build())
-                .addOnSuccessListener(u -> {
-                    if (promise != null) promise.resolve(null);
-                })
-                .addOnFailureListener(e -> fail(promise, e)))
-            .addOnFailureListener(e -> fail(promise, e));
-    }
-
-    private void fail(Promise promise, Exception e) {
-        active = false;
-        client().stopAllEndpoints();
-        emit("state", "error");
-        if (promise != null) promise.reject("nearby_failed", e.getMessage() == null ? "Nearby gagal dimulai" : e.getMessage());
-    }
-
-    /** Mulai mengumumkan diri dan mencari lawan bicara; local/peer adalah tag turunan, bukan username. */
+    /** Mulai mengumumkan nama (dibuat JS) dan mencari perangkat lain. */
     @ReactMethod
-    public void start(String local, String peer, Promise promise) {
+    public void start(String name, Promise promise) {
         stopInternal();
-        localTag = local;
-        peerTag = peer;
+        localName = name;
         active = true;
-        emit("state", "searching");
         try {
-            beginSearch(promise);
+            client().startAdvertising(localName, SERVICE_ID, lifecycle, new AdvertisingOptions.Builder().setStrategy(STRATEGY).build())
+                .addOnSuccessListener(unused -> client().startDiscovery(SERVICE_ID, discovery, new DiscoveryOptions.Builder().setStrategy(STRATEGY).build())
+                    .addOnSuccessListener(u -> {
+                        emit("state", "", "on");
+                        promise.resolve(null);
+                    })
+                    .addOnFailureListener(e -> fail(promise, e)))
+                .addOnFailureListener(e -> fail(promise, e));
         } catch (RuntimeException e) {
             fail(promise, e);
         }
     }
 
+    private void fail(Promise promise, Exception e) {
+        stopInternal();
+        emit("state", "", "error");
+        promise.reject("nearby_failed", e.getMessage() == null ? "Nearby gagal dimulai" : e.getMessage());
+    }
+
     @ReactMethod
-    public void send(String json, Promise promise) {
-        if (endpointId == null) {
+    public void request(String endpointId, Promise promise) {
+        if (!active || connected.size() + pending.size() >= MAX_LINKS) {
+            promise.reject("busy", "Terlalu banyak koneksi");
+            return;
+        }
+        pending.add(endpointId);
+        client().requestConnection(localName, endpointId, lifecycle)
+            .addOnSuccessListener(unused -> promise.resolve(null))
+            .addOnFailureListener(e -> {
+                pending.remove(endpointId);
+                promise.reject("request_failed", e.getMessage());
+            });
+    }
+
+    @ReactMethod
+    public void acceptEndpoint(String endpointId) {
+        client().acceptConnection(endpointId, payloadCallback);
+    }
+
+    @ReactMethod
+    public void rejectEndpoint(String endpointId) {
+        pending.remove(endpointId);
+        client().rejectConnection(endpointId);
+    }
+
+    @ReactMethod
+    public void disconnect(String endpointId) {
+        pending.remove(endpointId);
+        connected.remove(endpointId);
+        client().disconnectFromEndpoint(endpointId);
+    }
+
+    @ReactMethod
+    public void send(String endpointId, String json, Promise promise) {
+        if (!connected.contains(endpointId)) {
             promise.reject("not_connected", "Belum tersambung");
             return;
         }
         byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
         if (bytes.length > ConnectionsClient.MAX_BYTES_DATA_SIZE) {
-            promise.reject("too_large", "Pesan terlalu besar untuk Mode Dekat");
+            promise.reject("too_large", "Pesan terlalu besar untuk Siaran Dekat");
             return;
         }
         client().sendPayload(endpointId, Payload.fromBytes(bytes))
@@ -187,14 +206,14 @@ public class NearbyModule extends ReactContextBaseJavaModule {
     @ReactMethod
     public void stop(Promise promise) {
         stopInternal();
-        emit("state", "off");
+        emit("state", "", "off");
         promise.resolve(null);
     }
 
     private void stopInternal() {
         active = false;
-        connecting = false;
-        endpointId = null;
+        connected.clear();
+        pending.clear();
         if (client != null) {
             client.stopAdvertising();
             client.stopDiscovery();
