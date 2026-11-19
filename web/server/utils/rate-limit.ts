@@ -13,6 +13,13 @@ const ANONYMOUS_LIMIT = 50
 // login, daftar, lupa password: percobaan tanpa sesi dibatasi ketat (OWASP ASVS V2.2.1)
 const ANONYMOUS_AUTH_LIMIT = 10
 
+/** Batas yang berlaku, untuk ditampilkan di laporan (email cron). */
+export const RATE_LIMITS = {
+  loggedInPerMinute: LOGGED_IN_LIMIT,
+  anonymousPerMinute: ANONYMOUS_LIMIT,
+  anonymousAuthPerMinute: ANONYMOUS_AUTH_LIMIT,
+}
+
 const loggedInHit = createRateLimiter(LOGGED_IN_LIMIT, WINDOW_MS)
 const anonymousHit = createRateLimiter(ANONYMOUS_LIMIT, WINDOW_MS)
 const anonymousAuthHit = createRateLimiter(ANONYMOUS_AUTH_LIMIT, WINDOW_MS)

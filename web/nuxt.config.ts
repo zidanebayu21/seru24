@@ -37,6 +37,9 @@
     fcmPrivateKey: '',
     // Cron non-Vercel & SMTP untuk laporan statistik harian; isi via CRON_SECRET / NUXT_SMTP_* / SMTP_*.
     cronSecret: '',
+    // tanggal mulai siklus tagihan Supabase tiap bulan (dashboard Supabase > Usage); dipakai email cron untuk
+    // menampilkan kapan kuota direset; env NUXT_SUPABASE_BILLING_DAY
+    supabaseBillingDay: 11,
     // false = cron /api/cron/daily-stats tidak menjalankan apa pun (untuk deploy yang belum menyiapkan SMTP)
     smtpEnabled: true,
     smtpHost: '',
