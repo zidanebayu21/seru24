@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { BackupError, exportLocalBackup, groupMessagesByConversation, importLocalBackup, mergeConversations, openBackup, sealBackup, type BackupData, type BackupStore } from './backup-core'
-import type { Conversation } from './chat-core'
-import type { ChatMessage } from './e2ee-core'
+import { BackupError, exportLocalBackup, groupMessagesByConversation, importLocalBackup, mergeConversations, openBackup, sealBackup, type BackupData, type BackupStore } from '../../shared/backup-core'
+import type { Conversation } from '../../shared/chat-core'
+import type { ChatMessage } from '../../shared/e2ee-core'
 
 const conversation = (id: string): Conversation => ({
   id, status: 'accepted', requested_by: null, last_message_at: null, unread: 0, muted: false, archived: false,

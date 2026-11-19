@@ -1,6 +1,6 @@
 import { generateKeyPairSync, createVerify } from 'node:crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createServiceAccountJwt, parseFcmConfig, resetFcmTokenCache, sendFcmMessage } from './fcm'
+import { createServiceAccountJwt, parseFcmConfig, resetFcmTokenCache, sendFcmMessage } from '../../../server/utils/fcm'
 
 const { publicKey, privateKey } = generateKeyPairSync('rsa', {
   modulusLength: 2048,

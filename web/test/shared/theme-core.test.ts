@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { PALETTES, isThemePref, resolveTheme, type Palette, type ThemeName } from './theme-core'
+import { PALETTES, isThemePref, resolveTheme, type Palette, type ThemeName } from '../../shared/theme-core'
 
-const css = readFileSync(new URL('../app/assets/main.css', import.meta.url), 'utf8')
+const css = readFileSync(new URL('../../app/assets/main.css', import.meta.url), 'utf8')
 
 const CSS_VARS: Record<keyof Palette, string> = {
   bg: '--bg',

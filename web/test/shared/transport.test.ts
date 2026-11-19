@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { x25519 } from '@noble/curves/ed25519.js'
-import { openRequest, openResponse, sealRequest, sealResponse, transportKeyId } from './transport'
+import { openRequest, openResponse, sealRequest, sealResponse, transportKeyId } from '../../shared/transport'
 
 const server = x25519.keygen()
 const keyId = transportKeyId(server.publicKey)

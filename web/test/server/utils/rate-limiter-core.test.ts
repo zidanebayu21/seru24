@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createRateLimiter } from './rate-limiter-core'
+import { createRateLimiter } from '../../../server/utils/rate-limiter-core'
 
 describe('createRateLimiter', () => {
   it('menolak permintaan setelah melewati batas dalam satu jendela', () => {

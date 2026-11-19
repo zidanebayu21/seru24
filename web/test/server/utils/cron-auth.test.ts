@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isCronAuthorized } from './cron-auth'
+import { isCronAuthorized } from '../../../server/utils/cron-auth'
 
 describe('isCronAuthorized', () => {
   it('menolak semua permintaan bila CRON_SECRET kosong', () => {

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, AppState, FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
 import {
   CONVERSATION_PAGE_SIZE,
   appendConversations,
@@ -80,8 +80,13 @@ export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
       clearTimeout(timer);
       timer = setTimeout(load, 300);
     });
+    // aktif lagi setelah di latar belakang (realtime putus): susul jumlah belum dibaca dan urutan
+    const appState = AppState.addEventListener('change', state => {
+      if (state === 'active') load();
+    });
     return () => {
       stop();
+      appState.remove();
       clearTimeout(timer);
     };
   }, [load]);

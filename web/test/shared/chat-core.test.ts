@@ -10,7 +10,7 @@ import {
   oldestPersistedSeq,
   replySnippet,
   sliceMessagesPage,
-} from './chat-core'
+} from '../../shared/chat-core'
 
 describe('paginasi pesan', () => {
   it('membatasi 50 pesan per halaman dengan ambang prefetch di sekitar 40', () => {

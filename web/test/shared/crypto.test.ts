@@ -12,7 +12,7 @@ import {
   openKeyBackup,
   safetyCode,
   type MessageContext,
-} from './crypto'
+} from '../../shared/crypto'
 
 const CONVERSATION = '6f1c2a8e-0000-4000-8000-000000000001'
 const ALICE = '11111111-1111-4111-8111-111111111111'

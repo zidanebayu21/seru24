@@ -53,9 +53,19 @@ const stopInbox = onInbox((event) => {
   clearTimeout(reloadTimer)
   reloadTimer = setTimeout(load, 300)
 })
+// tab terlihat lagi / koneksi kembali: siaran realtime yang terlewat (jumlah belum dibaca, urutan) disusul
+const reloadOnReturn = () => {
+  if (document.visibilityState === 'visible') void load()
+}
+onMounted(() => {
+  document.addEventListener('visibilitychange', reloadOnReturn)
+  window.addEventListener('online', reloadOnReturn)
+})
 onBeforeUnmount(() => {
   stopInbox()
   clearTimeout(reloadTimer)
+  document.removeEventListener('visibilitychange', reloadOnReturn)
+  window.removeEventListener('online', reloadOnReturn)
 })
 
 const search = async () => {

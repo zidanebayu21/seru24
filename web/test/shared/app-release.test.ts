@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { driveLinks, isNewerRelease, parseAppRelease } from './app-release'
+import { driveLinks, isNewerRelease, parseAppRelease } from '../../shared/app-release'
 
 const release = {
   versionCode: 6,

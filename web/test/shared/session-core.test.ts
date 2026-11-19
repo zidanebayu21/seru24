@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { SecureFetchError } from './secure-fetch-core'
-import { createSessionCore, isNetworkError, type SecurePost } from './session-core'
+import { SecureFetchError } from '../../shared/secure-fetch-core'
+import { createSessionCore, isNetworkError, type SecurePost } from '../../shared/session-core'
 
 describe('isNetworkError', () => {
   it('jaringan putus atau server 5xx dianggap offline (sesi tidak dibuang)', () => {

@@ -13,7 +13,7 @@ import {
   formatFileSize,
   parseFileBody,
   safeFileName,
-} from './file-core'
+} from '../../shared/file-core'
 
 const body = {
   id: '67e76b16-020b-491b-a492-a5b9db754870',

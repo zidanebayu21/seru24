@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { appendConversations, cacheableConversations, formatDayLabel, isSameDay, listConversationsArgs, type Conversation } from './chat-core'
+import { appendConversations, cacheableConversations, changedMessages, formatDayLabel, isSameDay, listConversationsArgs, type Conversation } from '../../shared/chat-core'
 
 const conversation = (id: string) => ({ id, peer_id: `peer-${id}`, peer_username: id }) as Conversation
 
@@ -36,5 +36,20 @@ describe('label hari di chat', () => {
   it('isSameDay membandingkan tanggal kalender', () => {
     expect(isSameDay(new Date(2026, 10, 19, 1, 0).toISOString(), new Date(2026, 10, 19, 23, 0).toISOString())).toBe(true)
     expect(isSameDay(new Date(2026, 10, 19, 1, 0).toISOString(), new Date(2026, 10, 20, 1, 0).toISOString())).toBe(false)
+  })
+})
+
+describe('changedMessages', () => {
+  const message = (id: string, deleted: string | null = null, edited: string | null = null) => ({ client_msg_id: id, deleted_at: deleted, edited_at: edited })
+
+  it('mengembalikan pesan baru, yang dihapus, dan yang diedit; yang sama diabaikan', () => {
+    const known = [message('a'), message('b'), message('c')]
+    const fetched = [message('a'), message('b', '2026-11-19T10:00:00Z'), message('c', null, '2026-11-19T10:01:00Z'), message('d')]
+    expect(changedMessages(known, fetched).map((m) => m.client_msg_id)).toEqual(['b', 'c', 'd'])
+  })
+
+  it('tidak ada perubahan: hasil kosong; deleted_at undefined dianggap sama dengan null', () => {
+    expect(changedMessages([message('a')], [message('a')])).toEqual([])
+    expect(changedMessages([{ client_msg_id: 'a' }], [message('a')])).toEqual([])
   })
 })

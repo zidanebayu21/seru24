@@ -4,6 +4,7 @@ import {
   CHAT_PAGE_SIZE,
   CHAT_PREFETCH_OFFSET,
   bubbleStatus,
+  changedMessages,
   compareBubbles,
   formatClock,
   formatDayLabel,
@@ -280,6 +281,40 @@ const stopInbox = onInbox(async (event, payload) => {
   }
 })
 onBeforeUnmount(stopInbox)
+
+// Siaran realtime bisa terlewat (tab tertidur, koneksi putus): saat tab terlihat lagi, ambil pesan terbaru dan
+// terapkan yang baru, diedit, atau dihapus selama itu. Tidak perlu koneksi terus aktif.
+let resyncing = false
+let lastResync = 0
+const resync = async () => {
+  if (resyncing || !conversation.value || Date.now() - lastResync < 2000) return
+  resyncing = true
+  try {
+    const rows = await fetchPage()
+    const changed = changedMessages(allMessages.value, rows)
+    for (const row of changed) await upsert(row)
+    if (changed.some((row) => row.sender_id !== account.me?.id)) markRead()
+    rpc<number>('seru24_peer_read_seq', { p_conversation_id: conversationId })
+      .then((seq) => { peerReadSeq.value = Math.max(peerReadSeq.value, Number(seq) || 0) })
+      .catch(() => undefined)
+  } catch {
+    // tetap tampil dari cache; dicoba lagi saat tab terlihat atau koneksi kembali
+  } finally {
+    resyncing = false
+    lastResync = Date.now()
+  }
+}
+const onVisible = () => {
+  if (document.visibilityState === 'visible') void resync()
+}
+onMounted(() => {
+  document.addEventListener('visibilitychange', onVisible)
+  window.addEventListener('online', resync)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', onVisible)
+  window.removeEventListener('online', resync)
+})
 
 const deliver = async (build: (retry: boolean) => Promise<SendParams>, bubble: Bubble, retry = false): Promise<void> => {
   const params = await build(retry)

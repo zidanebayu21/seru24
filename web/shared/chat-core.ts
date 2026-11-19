@@ -112,6 +112,21 @@ const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(),
 
 export const isSameDay = (a: string, b: string) => new Date(a).toDateString() === new Date(b).toDateString()
 
+/**
+ * Pesan hasil ambil ulang yang belum ada di cache, atau yang sudah dihapus/diedit sejak itu. Dipakai saat
+ * kembali aktif: siaran realtime yang terlewat (app di latar belakang) tidak mengubah pesan lama sendiri.
+ */
+export const changedMessages = <T extends { client_msg_id: string; deleted_at?: string | null; edited_at?: string | null }>(
+  known: T[],
+  fetched: T[],
+): T[] => {
+  const byId = new Map(known.map((message) => [message.client_msg_id, message]))
+  return fetched.filter((message) => {
+    const existing = byId.get(message.client_msg_id)
+    return !existing || (existing.deleted_at ?? null) !== (message.deleted_at ?? null) || (existing.edited_at ?? null) !== (message.edited_at ?? null)
+  })
+}
+
 export interface PagedBubble {
   key: string
   seq: number

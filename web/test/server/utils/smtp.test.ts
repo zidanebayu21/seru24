@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildDailyStatsEmail, fileReportRows, formatStorage, parseSmtpConfig, type DailyStatsReport } from './smtp'
+import { buildDailyStatsEmail, fileReportRows, formatStorage, parseSmtpConfig, type DailyStatsReport } from '../../../server/utils/smtp'
 
 describe('smtp daily stats helper', () => {
   it('membaca konfigurasi SMTP dan menentukan mode secure dari port 465 vs 587', () => {

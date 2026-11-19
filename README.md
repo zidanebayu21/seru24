@@ -52,6 +52,15 @@ dengan komentar **WAJIB / OPSIONAL**. Salin ke `.env` masing-masing; file `.env`
    - Jadwal: `.github/workflows/daily-stats-cron.yml` (Senin & Kamis 01:00 UTC). Tanpa `CRON_SECRET` workflow dilewati.
 5. **Android (opsional)** — lihat bagian berikut. Isi `mobile/.env` (`API_BASE_URL` = domain web).
 
+### Test dan SonarQube
+
+- **Web:** semua test ada di `web/test/` dengan struktur folder sama seperti kode yang diuji (`web/test/shared` untuk
+  `web/shared`, `web/test/server/utils` untuk `web/server/utils`). Jalankan `npm test` atau `npm run test:coverage`
+  (menulis `web/coverage/lcov.info`).
+- **Mobile:** test ada di `mobile/__tests__/`. Jalankan `npx jest` atau `npx jest --coverage` di `mobile/`.
+- **SonarQube:** `sonar-project.properties` di root memetakan sumber (`sonar.sources`) dan test (`sonar.tests`) web dan mobile.
+  Buat laporan coverage dulu, lalu jalankan `sonar-scanner` dari root repo dengan `SONAR_TOKEN` di environment.
+
 ### Rahasia yang harus disimpan sendiri (tidak ada di repo)
 
 - `web/.env` (service role key, kunci transport, SMTP, Google Drive, FCM)

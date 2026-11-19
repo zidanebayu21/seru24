@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, BackHandler, FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, AppState, BackHandler, FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { MAX_TEXT_LENGTH, randomId } from '../../../web/shared/crypto';
 import { createTransferMeter, formatFileSize, safeFileName, splitByFileLimit, type FileMessageBody } from '../../../web/shared/file-core';
 import { Avatar } from '../components/Avatar';
@@ -8,6 +8,7 @@ import {
   CHAT_PAGE_SIZE,
   SEND_ERRORS,
   bubbleStatus,
+  changedMessages,
   formatClock,
   formatDayLabel,
   isSameDay,
@@ -226,14 +227,9 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
       }
     })();
 
-    const stop = inbox.onInbox(async (event, payload) => {
-      if (payload.conversation_id !== conversation.id) return;
-      if (event === 'read') {
-        setPeerReadSeq(seq => Math.max(seq, Number(payload.seq) || 0));
-        return;
-      }
-      const msg = payload as unknown as ChatMessage;
-      if (deletedIdsRef.current.has(msg.client_msg_id) || msg.seq <= clearedUpToSeqRef.current) return;
+    /** Gabungkan satu pesan (baru, diedit, atau dihapus) ke cache dan daftar gelembung; null bila diabaikan. */
+    const applyMessage = async (msg: ChatMessage): Promise<Bubble | null> => {
+      if (deletedIdsRef.current.has(msg.client_msg_id) || msg.seq <= clearedUpToSeqRef.current) return null;
       const myId = account.me?.id ?? '';
       allMessagesRef.current = mergeCachedMessages(
         allMessagesRef.current,
@@ -245,6 +241,48 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
 
       const bubble = await toBubble(msg);
       updateBubbles(list => mergePagedBubbles([bubble], list));
+      return bubble;
+    };
+
+    // Realtime diputus saat app di latar belakang (hemat baterai): saat aktif lagi, ambil pesan terbaru lewat REST
+    // dan terapkan yang baru, diedit, atau dihapus selama itu.
+    let resyncing = false;
+    const resync = async () => {
+      if (resyncing) return;
+      resyncing = true;
+      try {
+        const rows = await rpc<ChatMessage[]>('seru24_get_messages', {
+          p_conversation_id: conversation.id,
+          p_limit: CHAT_PAGE_SIZE,
+        });
+        const changed = changedMessages(allMessagesRef.current, rows);
+        for (const row of changed) {
+          if (!alive) return;
+          await applyMessage(row);
+        }
+        const fromPeer = changed.filter(row => row.sender_id !== account.me?.id);
+        if (fromPeer.length > 0) markRead(Math.max(...fromPeer.map(row => row.seq)));
+        rpc<number>('seru24_peer_read_seq', { p_conversation_id: conversation.id })
+          .then(seq => setPeerReadSeq(prev => Math.max(prev, Number(seq) || 0)))
+          .catch(() => undefined);
+      } catch {
+        // tetap tampil dari cache; dicoba lagi saat app aktif berikutnya
+      } finally {
+        resyncing = false;
+      }
+    };
+    const appState = AppState.addEventListener('change', state => {
+      if (state === 'active') resync().catch(() => undefined);
+    });
+
+    const stop = inbox.onInbox(async (event, payload) => {
+      if (payload.conversation_id !== conversation.id) return;
+      if (event === 'read') {
+        setPeerReadSeq(seq => Math.max(seq, Number(payload.seq) || 0));
+        return;
+      }
+      const bubble = await applyMessage(payload as unknown as ChatMessage);
+      if (!bubble) return;
       if (event === 'message_new') {
         if (!bubble.mine) presenceRef.current?.clearPeerTyping();
         // balasan pertama dari lawan bicara = permintaan chat kita diterima
@@ -255,6 +293,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     return () => {
       alive = false;
       stop();
+      appState.remove();
       presenceRef.current?.close();
       presenceRef.current = null;
     };
