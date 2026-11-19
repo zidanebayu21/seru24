@@ -45,4 +45,14 @@ jobs:
           cache: npm
           cache-dependency-path: mobile/package-lock.json
       - run: npm ci
+      # src/env.ts dibuat dari .env saat build dan tidak ada di git; test yang mengimpor kode aplikasi membutuhkannya.
+      # Nilai di sini hanya contoh untuk CI (bukan rahasia).
+      - name: Buat src/env.ts
+        run: |
+          {
+            echo "SUPABASE_URL=https://example.supabase.co"
+            echo "SUPABASE_ANON_KEY=ci-test-key"
+            echo "API_BASE_URL=https://example.test"
+          } > .env
+          node scripts/gen-env.js
       - run: npx jest
