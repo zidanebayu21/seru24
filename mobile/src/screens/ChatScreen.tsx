@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, BackHandler, FlatList, KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, BackHandler, FlatList, KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from 'react-native';
 import { MAX_TEXT_LENGTH, randomId } from '../../../web/shared/crypto';
-import { formatFileSize, safeFileName, type FileMessageBody } from '../../../web/shared/file-core';
+import { createTransferMeter, formatFileSize, safeFileName, splitByFileLimit, type FileMessageBody } from '../../../web/shared/file-core';
 import {
   CHAT_MOBILE_PREFETCH_SCREENS,
   CHAT_PAGE_SIZE,
@@ -47,6 +47,8 @@ interface Bubble {
   file: FileMessageBody | null;
   /** Status unggah/unduh dokumen yang sedang berjalan. */
   progress: string;
+  /** Bar progres 0..1 untuk unggah/unduh dokumen. */
+  fraction?: number;
   /** File sudah diunduh ke HP: tombol jadi "Buka" (tanpa unduh ulang). */
   savedUri: string | null;
   /** id pesan yang dibalas (kolom reply_to). */
@@ -77,7 +79,6 @@ const queuedAsMessage = (item: QueuedMessage, myId: string | null): ChatMessage 
   expires_at: null,
 });
 
-const percent = (done: number, total: number) => `${Math.round((done / Math.max(total, 1)) * 100)}%`;
 
 interface Props {
   conversation: Conversation;
@@ -415,9 +416,11 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     let uploaded: FileMessageBody | null = null;
     try {
       updateBubble(key, { progress: 'Mengenkripsi…' });
-      uploaded = await uploadFile(conversation.id, picked, (done, total) =>
-        updateBubble(key, { progress: `Mengunggah ${percent(done, total)}` }),
-      );
+      const meter = createTransferMeter('Mengunggah');
+      uploaded = await uploadFile(conversation.id, picked, (done, total) => {
+        const { label, fraction } = meter(done, total);
+        updateBubble(key, { progress: label, fraction });
+      });
       const meta = uploaded;
       updateBubble(key, { file: meta, progress: '' });
       await deliver(retry => e2ee.encryptFile(conversation.id, peerId, meta, retry).then(params => {
@@ -438,7 +441,10 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
   const attachFiles = async () => {
     setError('');
     const picked = await pickFiles().catch(() => [] as PickedFile[]);
-    for (const file of picked) await sendFile(file);
+    // file di atas batas tidak dibuat sebagai pesan (tidak bisa dihapus dari daftar): cukup popup
+    const { allowed, message } = splitByFileLimit(picked);
+    if (message) Alert.alert('File terlalu besar', message);
+    for (const file of allowed) await sendFile(file);
   };
 
   /** Sudah tersimpan di HP: langsung buka; bila filenya sudah dihapus dari HP, unduh ulang. */
@@ -457,7 +463,11 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     }
     updateBubble(item.key, { failed: '', progress: 'Mengunduh…' });
     try {
-      const uri = await downloadFile(item.file, (done, total) => updateBubble(item.key, { progress: `Mengunduh ${percent(done, total)}` }));
+      const meter = createTransferMeter('Mengunduh');
+      const uri = await downloadFile(item.file, (done, total) => {
+        const { label, fraction } = meter(done, total);
+        updateBubble(item.key, { progress: label, fraction });
+      });
       updateBubble(item.key, { progress: SAVED_NOTE, savedUri: uri });
     } catch {
       updateBubble(item.key, { progress: '', failed: 'Dokumen gagal diunduh' });
@@ -633,6 +643,11 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
               <Text style={{ color: colors.text }}>{item.text}</Text>
             )}
             {item.progress ? <Text style={[ui.muted, { fontSize: 12 }]}>{item.progress}</Text> : null}
+            {item.progress && item.fraction !== undefined ? (
+              <View style={[styles.barTrack, { backgroundColor: colors.border }]}>
+                <View style={[styles.barFill, { backgroundColor: colors.accent, width: `${Math.round(item.fraction * 100)}%` }]} />
+              </View>
+            ) : null}
             <View style={[ui.row, { justifyContent: 'flex-end', gap: 10 }]}>
               <Text style={[ui.muted, { fontSize: 11 }]}>{bubbleStatus(item, peerReadSeq).text}</Text>
               {bubbleStatus(item, peerReadSeq).ticks ? (
@@ -719,6 +734,8 @@ const styles = themed(() => ({
   replying: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingTop: 6 },
   ticks: { fontSize: 11, color: colors.muted, letterSpacing: -2 },
   ticksRead: { color: colors.accent, fontWeight: '700' },
+  barTrack: { height: 4, borderRadius: 2, overflow: 'hidden', marginTop: 2 },
+  barFill: { height: 4, borderRadius: 2 },
   docButton: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: colors.border },
   composer: {
     flexDirection: 'row',

@@ -58,3 +58,47 @@ export const formatFileSize = (bytes: number): string => {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
+
+export const formatDuration = (seconds: number): string => {
+  const total = Math.max(1, Math.round(seconds))
+  if (total < 60) return `${total} dtk`
+  if (total < 3600) return `${Math.floor(total / 60)} mnt ${total % 60} dtk`
+  return `${Math.floor(total / 3600)} j ${Math.floor((total % 3600) / 60)} mnt`
+}
+
+export interface TransferStatus {
+  /** 0..1 untuk bar progres. */
+  fraction: number
+  /** Mis. "Mengunggah 34% · 1.2 MB/dtk · sisa 12 dtk". */
+  label: string
+}
+
+/**
+ * Kecepatan dan sisa waktu dihitung dari byte yang bergerak sejak laporan pertama (bukan sejak mulai enkripsi),
+ * jadi tidak terdistorsi waktu persiapan. Kecepatan baru tampil setelah ada dua laporan.
+ */
+export const createTransferMeter = (verb: string, now: () => number = Date.now) => {
+  let first: { at: number; done: number } | null = null
+  return (done: number, total: number): TransferStatus => {
+    const fraction = Math.min(1, Math.max(0, done / Math.max(total, 1)))
+    const at = now()
+    first ??= { at, done }
+    const parts = [`${verb} ${Math.round(fraction * 100)}%`]
+    const elapsedSeconds = (at - first.at) / 1000
+    const speed = elapsedSeconds > 0 ? (done - first.done) / elapsedSeconds : 0
+    if (speed > 0) {
+      parts.push(`${formatFileSize(speed)}/dtk`)
+      if (total > done) parts.push(`sisa ${formatDuration((total - done) / speed)}`)
+    }
+    return { fraction, label: parts.join(' · ') }
+  }
+}
+
+/** Pisahkan file yang boleh dikirim dari yang melebihi batas; message = isi popup (null bila semua boleh). */
+export const splitByFileLimit = <T extends { name: string; size: number }>(files: T[]): { allowed: T[]; message: string | null } => {
+  const allowed = files.filter((file) => file.size <= MAX_FILE_BYTES)
+  const rejected = files.filter((file) => file.size > MAX_FILE_BYTES)
+  if (rejected.length === 0) return { allowed, message: null }
+  const names = rejected.map((file) => `${safeFileName(file.name)} (${formatFileSize(file.size)})`).join(', ')
+  return { allowed, message: `Melebihi batas ${formatFileSize(MAX_FILE_BYTES)} per file, tidak dikirim: ${names}` }
+}

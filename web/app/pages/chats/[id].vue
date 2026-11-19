@@ -13,7 +13,7 @@ import {
   sliceMessagesPage,
 } from '#shared/chat-core'
 import { createConversationPresence, type PeerPresence } from '#shared/presence-core'
-import { MAX_FILE_BYTES, formatFileSize, safeFileName, type FileMessageBody } from '#shared/file-core'
+import { createTransferMeter, formatFileSize, safeFileName, splitByFileLimit, type FileMessageBody } from '#shared/file-core'
 
 interface Bubble {
   key: string
@@ -28,6 +28,8 @@ interface Bubble {
   file: FileMessageBody | null
   /** Status unggah/unduh dokumen yang sedang berjalan. */
   progress: string
+  /** Bar progres 0..1 untuk unggah/unduh dokumen. */
+  fraction?: number
   /** id pesan yang dibalas (kolom reply_to). */
   replyTo: string | null
 }
@@ -81,7 +83,6 @@ const toBubble = async (m: ChatMessage): Promise<Bubble> => ({
   replyTo: m.reply_to,
 })
 
-const percent = (done: number, total: number) => `${Math.round((done / Math.max(total, 1)) * 100)}%`
 
 const localBubble = (text: string, replyTo: string | null = null): Bubble => reactive<Bubble>({
   key: `local-${randomId()}`, id: null, seq: 0, mine: true, text,
@@ -323,15 +324,15 @@ const sendFile = async (file: File) => {
   const bubble = localBubble(`📎 ${safeFileName(file.name)}`)
   bubbles.value.push(bubble)
   await scrollToBottom()
-  if (file.size > MAX_FILE_BYTES) {
-    bubble.pending = false
-    bubble.failed = `Maksimal ${formatFileSize(MAX_FILE_BYTES)} per file`
-    return
-  }
   let uploaded: FileMessageBody | null = null
   try {
     bubble.progress = 'Mengenkripsi…'
-    uploaded = await uploadFile(conversationId, file, (done, total) => { bubble.progress = `Mengunggah ${percent(done, total)}` })
+    const meter = createTransferMeter('Mengunggah')
+    uploaded = await uploadFile(conversationId, file, (done, total) => {
+      const status = meter(done, total)
+      bubble.progress = status.label
+      bubble.fraction = status.fraction
+    })
     bubble.file = uploaded
     bubble.progress = ''
     const meta = uploaded
@@ -351,14 +352,22 @@ const onFilesPicked = async (event: Event) => {
   const files = [...(input.files ?? [])]
   input.value = ''
   error.value = ''
-  for (const file of files) await sendFile(file)
+  // file di atas batas tidak dibuat sebagai pesan (tidak bisa dihapus dari daftar): cukup popup
+  const { allowed, message } = splitByFileLimit(files)
+  if (message) window.alert(message)
+  for (const file of allowed) await sendFile(file)
 }
 
 const download = async (bubble: Bubble) => {
   if (!bubble.file || bubble.progress) return
   bubble.failed = ''
   try {
-    await downloadFile(bubble.file, (done, total) => { bubble.progress = `Mengunduh ${percent(done, total)}` })
+    const meter = createTransferMeter('Mengunduh')
+    await downloadFile(bubble.file, (done, total) => {
+      const status = meter(done, total)
+      bubble.progress = status.label
+      bubble.fraction = status.fraction
+    })
   } catch {
     bubble.failed = 'Dokumen gagal diunduh'
   } finally {
@@ -503,6 +512,9 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
         </div>
         <p v-else class="text">{{ b.text }}</p>
         <p v-if="b.progress" class="muted progress">{{ b.progress }}</p>
+        <div v-if="b.progress && b.fraction !== undefined" class="bar" role="progressbar" :aria-valuenow="Math.round(b.fraction * 100)" aria-valuemin="0" aria-valuemax="100">
+          <div class="bar-fill" :style="{ width: Math.round(b.fraction * 100) + '%' }" />
+        </div>
         <div class="foot row">
           <span class="muted">{{ status(b).text }}</span>
           <span
@@ -624,4 +636,6 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
 .doc-name { overflow-wrap: anywhere; }
 .doc-get { padding: 4px 10px; font-size: 13px; }
 .progress { font-size: 12px; }
+.bar { height: 4px; border-radius: 2px; overflow: hidden; background: var(--border); }
+.bar-fill { height: 100%; background: var(--accent); transition: width 0.2s linear; }
 </style>

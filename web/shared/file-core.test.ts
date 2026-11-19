@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   FILE_CHUNK_BYTES,
   MAX_FILE_BYTES,
+  createTransferMeter,
+  formatDuration,
+  splitByFileLimit,
   chunkRanges,
   formatFileSize,
   parseFileBody,
@@ -51,5 +54,32 @@ describe('file-core', () => {
     expect(formatFileSize(512)).toBe('512 B')
     expect(formatFileSize(2048)).toBe('2.0 KB')
     expect(formatFileSize(50 * 1024 * 1024)).toBe('50.0 MB')
+  })
+})
+
+describe('transfer meter dan batas file', () => {
+  it('menghitung persen, kecepatan, dan sisa waktu dari byte yang bergerak', () => {
+    let t = 0
+    const meter = createTransferMeter('Mengunggah', () => t)
+    expect(meter(0, 5 * 1024 * 1024).label).toBe('Mengunggah 0%')
+    t = 1000
+    const status = meter(1024 * 1024, 5 * 1024 * 1024)
+    expect(status.fraction).toBeCloseTo(0.2)
+    expect(status.label).toBe('Mengunggah 20% · 1.0 MB/dtk · sisa 4 dtk')
+  })
+
+  it('formatDuration memakai dtk, mnt, dan j', () => {
+    expect(formatDuration(0.2)).toBe('1 dtk')
+    expect(formatDuration(65)).toBe('1 mnt 5 dtk')
+    expect(formatDuration(3720)).toBe('1 j 2 mnt')
+  })
+
+  it('splitByFileLimit menahan file di atas 50 MB dan menyusun pesan popup', () => {
+    const small = { name: 'a.png', size: 1024 }
+    const big = { name: 'film.mp4', size: MAX_FILE_BYTES + 1 }
+    expect(splitByFileLimit([small])).toEqual({ allowed: [small], message: null })
+    const result = splitByFileLimit([small, big])
+    expect(result.allowed).toEqual([small])
+    expect(result.message).toContain('film.mp4')
   })
 })
