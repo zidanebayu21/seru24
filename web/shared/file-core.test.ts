@@ -3,6 +3,10 @@ import {
   FILE_CHUNK_BYTES,
   MAX_FILE_BYTES,
   createTransferMeter,
+  formatClockSeconds,
+  isVoiceFile,
+  voiceFileName,
+  voiceSecondsFromName,
   formatDuration,
   splitByFileLimit,
   chunkRanges,
@@ -81,5 +85,27 @@ describe('transfer meter dan batas file', () => {
     const result = splitByFileLimit([small, big])
     expect(result.allowed).toEqual([small])
     expect(result.message).toContain('film.mp4')
+  })
+})
+
+describe('pesan suara', () => {
+  it('isVoiceFile hanya menerima audio dari daftar, mengabaikan parameter codecs dan huruf besar', () => {
+    expect(isVoiceFile({ mime: 'audio/webm;codecs=opus' })).toBe(true)
+    expect(isVoiceFile({ mime: 'Audio/MP4' })).toBe(true)
+    expect(isVoiceFile({ mime: 'audio/x-unknown' })).toBe(false)
+    expect(isVoiceFile({ mime: 'text/html' })).toBe(false)
+    expect(isVoiceFile({ mime: 'application/octet-stream' })).toBe(false)
+  })
+
+  it('durasi ikut di nama file dan bisa dibaca kembali', () => {
+    const name = voiceFileName(22.6, 'webm', new Date(2026, 10, 19, 9, 5))
+    expect(name).toBe('suara-20261119-0905-23s.webm')
+    expect(voiceSecondsFromName(name)).toBe(23)
+    expect(voiceSecondsFromName('catatan.webm')).toBeNull()
+  })
+
+  it('formatClockSeconds menampilkan menit:detik', () => {
+    expect(formatClockSeconds(7)).toBe('0:07')
+    expect(formatClockSeconds(65.9)).toBe('1:05')
   })
 })

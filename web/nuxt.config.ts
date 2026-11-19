@@ -88,6 +88,8 @@
         'img-src': ["'self'", 'data:', 'blob:'],
         'connect-src': ["'self'", 'https://*.supabase.co', 'wss://*.supabase.co'],
         'font-src': ["'self'"],
+        // pesan suara diputar dari blob: hasil dekripsi di browser
+        'media-src': ["'self'", 'blob:'],
         'object-src': ["'none'"],
         'base-uri': ["'none'"],
         'form-action': ["'self'"],
@@ -97,7 +99,8 @@
       crossOriginEmbedderPolicy: 'credentialless',
       referrerPolicy: 'no-referrer',
       strictTransportSecurity: { maxAge: 31_536_000, includeSubdomains: true },
-      permissionsPolicy: { camera: [], microphone: [], geolocation: [], 'display-capture': [] },
+      // mikrofon hanya untuk situs ini (merekam pesan suara); kamera, lokasi, dan tangkapan layar tetap tertutup
+      permissionsPolicy: { camera: [], microphone: ['self'], geolocation: [], 'display-capture': [] },
     },
   },
 })

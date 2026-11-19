@@ -1,6 +1,8 @@
 import { fromBase64, toBase64 } from '#shared/crypto'
 import {
   FILE_CHUNK_BYTES,
+  baseMime,
+  isVoiceFile,
   FILE_TAG_BYTES,
   MAX_FILE_BYTES,
   chunkRanges,
@@ -86,8 +88,8 @@ export const uploadFile = async (conversationId: string, file: File, onProgress?
   }
 }
 
-/** Unduh per potongan, dekripsi di browser, lalu simpan dengan nama aslinya. */
-export const downloadFile = async (file: FileMessageBody, onProgress?: Progress): Promise<void> => {
+/** Unduh per potongan lalu dekripsi di browser; hasilnya hanya ada di memori. */
+const fetchDecrypted = async (file: FileMessageBody, onProgress?: Progress): Promise<ArrayBuffer> => {
   const total = file.size + FILE_TAG_BYTES
   const encrypted = new Uint8Array(total)
   for (const [index, [from]] of chunkRanges(total).entries()) {
@@ -103,13 +105,24 @@ export const downloadFile = async (file: FileMessageBody, onProgress?: Progress)
   const rawKey = new Uint8Array(fromBase64(file.key))
   const key = await crypto.subtle.importKey('raw', rawKey, 'AES-GCM', false, ['decrypt'])
   rawKey.fill(0)
-  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(fromBase64(file.iv)) }, key, encrypted)
+  return crypto.subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(fromBase64(file.iv)) }, key, encrypted)
+}
+
+/** Unduh per potongan, dekripsi di browser, lalu simpan dengan nama aslinya. */
+export const downloadFile = async (file: FileMessageBody, onProgress?: Progress): Promise<void> => {
+  const plain = await fetchDecrypted(file, onProgress)
   const url = URL.createObjectURL(new Blob([plain], { type: 'application/octet-stream' }))
   const link = document.createElement('a')
   link.href = url
   link.download = file.name
   link.click()
   setTimeout(() => URL.revokeObjectURL(url), 10_000)
+}
+
+/** Dekripsi pesan suara untuk diputar; URL blob harus di-revoke pemanggil setelah dipakai. */
+export const fetchAudioUrl = async (file: FileMessageBody, onProgress?: Progress): Promise<string> => {
+  if (!isVoiceFile(file)) throw new Error('Bukan pesan suara')
+  return URL.createObjectURL(new Blob([await fetchDecrypted(file, onProgress)], { type: baseMime(file.mime) }))
 }
 
 /** Hapus dokumen di server dan Google Drive (hanya pengunggah). */

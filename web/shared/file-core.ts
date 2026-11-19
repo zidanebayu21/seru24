@@ -35,6 +35,34 @@ export const safeFileName = (name: string): string => {
   return (clean || 'dokumen').slice(0, MAX_FILE_NAME_LENGTH)
 }
 
+const VOICE_MIME = /^audio\/(webm|ogg|mp4|mpeg|wav|aac|x-m4a)$/
+
+/** Tipe dasar tanpa parameter (mis. "audio/webm;codecs=opus" -> "audio/webm"), huruf kecil. */
+export const baseMime = (mime: string): string => (mime.split(';')[0] ?? '').trim().toLowerCase()
+
+/** Hanya audio dari daftar ini yang diputar di chat; mime berasal dari pengirim sehingga tidak dipercaya mentah. */
+export const isVoiceFile = (file: { mime: string }): boolean => VOICE_MIME.test(baseMime(file.mime))
+
+const VOICE_SECONDS_IN_NAME = /-(\d{1,5})s\.[a-z0-9]{2,4}$/i
+
+/** Nama file pesan suara memuat durasi (suara-20261119-1030-23s.webm); rekaman MediaRecorder tidak punya metadata durasi. */
+export const voiceFileName = (seconds: number, extension: string, now: Date = new Date()): string => {
+  const pad = (value: number) => String(value).padStart(2, '0')
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`
+  return `suara-${stamp}-${Math.max(0, Math.round(seconds))}s.${extension}`
+}
+
+export const voiceSecondsFromName = (name: string): number | null => {
+  const match = VOICE_SECONDS_IN_NAME.exec(name)
+  return match ? Number(match[1]) : null
+}
+
+/** Mis. 0:07 atau 1:05. */
+export const formatClockSeconds = (seconds: number): string => {
+  const total = Math.max(0, Math.floor(seconds))
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
+}
+
 /** Validasi isi pesan file hasil dekripsi; null bila bentuknya tidak sesuai. */
 export const parseFileBody = (value: unknown): FileMessageBody | null => {
   if (!value || typeof value !== 'object') return null

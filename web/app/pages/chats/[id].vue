@@ -16,7 +16,16 @@ import {
   sliceMessagesPage,
 } from '#shared/chat-core'
 import { createConversationPresence, type PeerPresence } from '#shared/presence-core'
-import { createTransferMeter, formatFileSize, safeFileName, splitByFileLimit, type FileMessageBody } from '#shared/file-core'
+import {
+  createTransferMeter,
+  formatClockSeconds,
+  formatFileSize,
+  isVoiceFile,
+  safeFileName,
+  splitByFileLimit,
+  voiceSecondsFromName,
+  type FileMessageBody,
+} from '#shared/file-core'
 
 interface Bubble {
   key: string
@@ -330,8 +339,8 @@ const send = async () => {
 }
 
 /** Dokumen dikirim satu per satu: enkripsi, unggah per potongan, lalu kirim pesan berisi kunci file (E2EE). */
-const sendFile = async (file: File) => {
-  const bubble = localBubble(`📎 ${safeFileName(file.name)}`)
+const sendFile = async (file: File, label?: string) => {
+  const bubble = localBubble(label ?? `📎 ${safeFileName(file.name)}`)
   bubbles.value.push(bubble)
   await scrollToBottom()
   let uploaded: FileMessageBody | null = null
@@ -460,6 +469,119 @@ const isTight = (index: number): boolean => {
   return Boolean(current && previous && current.mine === previous.mine && isSameDay(previous.createdAt, current.createdAt))
 }
 
+// ---- pesan suara ----
+
+const recording = ref(false)
+const recordSeconds = ref(0)
+let recorder: VoiceRecording | null = null
+let recordTicker: ReturnType<typeof setInterval> | undefined
+
+const resetRecording = () => {
+  clearInterval(recordTicker)
+  recorder = null
+  recording.value = false
+  recordSeconds.value = 0
+}
+
+const startRecording = async () => {
+  error.value = ''
+  try {
+    const started = await startVoiceRecording(() => { void finishRecording() })
+    recorder = started
+    recording.value = true
+    recordTicker = setInterval(() => { recordSeconds.value = Math.floor((Date.now() - started.startedAt) / 1000) }, 250)
+  } catch {
+    error.value = 'Mikrofon tidak bisa dipakai. Izinkan akses mikrofon untuk situs ini di pengaturan browser.'
+  }
+}
+
+const cancelRecording = () => {
+  recorder?.cancel()
+  resetRecording()
+}
+
+const finishRecording = async () => {
+  const current = recorder
+  if (!current) return
+  resetRecording()
+  const file = await current.stop()
+  if (file) await sendFile(file, 'Pesan suara')
+}
+
+interface Player {
+  state: 'idle' | 'loading' | 'playing' | 'paused'
+  current: number
+}
+
+const players = reactive<Record<string, Player>>({})
+const audios = new Map<string, { audio: HTMLAudioElement; url: string }>()
+
+const playerOf = (b: Bubble): Player => (players[b.key] ??= { state: 'idle', current: 0 })
+
+const voiceDuration = (b: Bubble) => (b.file ? voiceSecondsFromName(b.file.name) : null)
+
+const voiceLabel = (b: Bubble) => {
+  const player = playerOf(b)
+  const total = voiceDuration(b)
+  if (player.state === 'loading') return 'Memuat…'
+  const shown = player.state === 'idle' ? (total ?? 0) : player.current
+  return formatClockSeconds(shown)
+}
+
+const voiceProgress = (b: Bubble) => {
+  const total = voiceDuration(b)
+  return total ? Math.min(100, (playerOf(b).current / total) * 100) : 0
+}
+
+const pauseOthers = (exceptKey: string) => {
+  for (const [key, { audio }] of audios) {
+    if (key !== exceptKey && !audio.paused) audio.pause()
+  }
+}
+
+const togglePlay = async (b: Bubble) => {
+  if (!b.file) return
+  const player = playerOf(b)
+  if (player.state === 'loading') return
+  let entry = audios.get(b.key)
+  if (!entry) {
+    player.state = 'loading'
+    try {
+      const url = await fetchAudioUrl(b.file)
+      const audio = new Audio(url)
+      audio.addEventListener('timeupdate', () => { player.current = audio.currentTime })
+      audio.addEventListener('play', () => { player.state = 'playing' })
+      audio.addEventListener('pause', () => { if (!audio.ended) player.state = 'paused' })
+      audio.addEventListener('ended', () => { player.state = 'idle'; player.current = 0 })
+      entry = { audio, url }
+      audios.set(b.key, entry)
+    } catch {
+      player.state = 'idle'
+      b.failed = 'Pesan suara gagal dimuat'
+      return
+    }
+  }
+  if (entry.audio.paused) {
+    pauseOthers(b.key)
+    await entry.audio.play().catch(() => { player.state = 'idle' })
+  } else {
+    entry.audio.pause()
+  }
+}
+
+const releaseAudio = () => {
+  for (const { audio, url } of audios.values()) {
+    audio.pause()
+    URL.revokeObjectURL(url)
+  }
+  audios.clear()
+}
+
+onBeforeUnmount(() => {
+  cancelRecording()
+  releaseAudio()
+})
+
 const startReply = (b: Bubble) => {
   replyingTo.value = b
   nextTick(() => document.querySelector<HTMLTextAreaElement>('.composer textarea')?.focus())
@@ -535,6 +657,20 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
         </div>
         <p v-if="b.deleted" class="muted"><em>Pesan dihapus</em></p>
         <p v-else-if="b.text === null" class="muted"><em>Pesan tidak dapat dibuka</em></p>
+        <div v-else-if="b.file && isVoiceFile(b.file)" class="voice">
+          <button
+            type="button"
+            class="voice-btn"
+            :disabled="b.pending"
+            :aria-label="playerOf(b).state === 'playing' ? 'Jeda' : 'Putar pesan suara'"
+            @click="togglePlay(b)"
+          >
+            <svg v-if="playerOf(b).state === 'playing'" viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
+            <svg v-else viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z" /></svg>
+          </button>
+          <div class="voice-track" aria-hidden="true"><div class="voice-fill" :style="{ width: voiceProgress(b) + '%' }" /></div>
+          <span class="voice-time">{{ voiceLabel(b) }}</span>
+        </div>
         <div v-else-if="b.file" class="doc row">
           <span class="doc-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></svg>
@@ -594,7 +730,18 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
       </div>
       <button type="button" class="icon-del" aria-label="Batal membalas" title="Batal" @click="replyingTo = null">&times;</button>
     </div>
-    <form class="composer row" @submit.prevent="send">
+    <div v-if="recording" class="composer row recording" role="group" aria-label="Merekam pesan suara">
+      <button type="button" class="attach" aria-label="Batalkan rekaman" title="Batalkan" @click="cancelRecording">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16" /><path d="M9 7V4h6v3" /><path d="M6 7l1 13h10l1-13" /></svg>
+      </button>
+      <span class="rec-dot" aria-hidden="true" />
+      <span class="rec-time" aria-live="off">{{ formatClockSeconds(recordSeconds) }}</span>
+      <span class="rec-hint muted">Merekam…</span>
+      <button type="button" class="primary send" aria-label="Kirim pesan suara" @click="finishRecording">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14" /><path d="M13 6l6 6-6 6" /></svg>
+      </button>
+    </div>
+    <form v-else class="composer row" @submit.prevent="send">
       <input ref="fileInput" type="file" multiple hidden @change="onFilesPicked">
       <button
         type="button"
@@ -615,7 +762,18 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
         @keydown.enter.exact.prevent="send"
         @input="presence?.notifyTyping()"
       />
-      <button class="primary send" type="submit" aria-label="Kirim pesan" :disabled="!draft.trim() || keyStatus.status === 'missing'">
+      <button
+        v-if="!draft.trim() && canRecordVoice()"
+        type="button"
+        class="primary send"
+        aria-label="Rekam pesan suara"
+        title="Rekam pesan suara"
+        :disabled="keyStatus.status === 'missing' || conversation.peer_blocked"
+        @click="startRecording"
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0" /><path d="M12 18v3" /></svg>
+      </button>
+      <button v-else class="primary send" type="submit" aria-label="Kirim pesan" :disabled="!draft.trim() || keyStatus.status === 'missing'">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14" /><path d="M13 6l6 6-6 6" /></svg>
       </button>
     </form>
@@ -680,7 +838,7 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
 .bubble.failed { box-shadow: 0 0 0 1.5px var(--danger); }
 .bubble p { margin: 0; }
 .text { white-space: pre-wrap; overflow-wrap: anywhere; }
-.foot { justify-content: flex-end; gap: 6px; min-height: 18px; }
+.foot { width: 100%; justify-content: flex-end; gap: 6px; min-height: 18px; }
 .foot .muted { font-size: 11px; }
 .icon-del, .icon-reply {
   display: grid;
@@ -722,6 +880,18 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
 .attach, .send { display: grid; place-items: center; flex: none; width: 40px; min-height: 40px; height: 40px; padding: 0; border-radius: 50%; }
 .attach { border-color: transparent; background: transparent; color: var(--muted); }
 .attach:hover:not(:disabled) { border-color: transparent; background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
+.voice { display: flex; align-items: center; gap: 10px; min-width: min(15rem, 60vw); }
+.voice-btn { display: grid; place-items: center; flex: none; width: 36px; min-height: 36px; height: 36px; padding: 0; border: 0; border-radius: 50%; background: var(--accent); color: var(--accent-text); }
+.voice-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, #000); }
+.voice-track { flex: 1; height: 4px; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, var(--text) 15%, transparent); }
+.voice-fill { height: 100%; background: var(--accent); }
+.voice-time { flex: none; min-width: 2.6em; text-align: right; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.recording { align-items: center; gap: 10px; }
+.rec-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--danger); animation: rec-pulse 1.2s ease-in-out infinite; }
+.rec-time { font-variant-numeric: tabular-nums; font-weight: 600; }
+.rec-hint { flex: 1; }
+@keyframes rec-pulse { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .rec-dot { animation: none; } }
 .doc { gap: 12px; align-items: center; min-width: min(16rem, 62vw); }
 .doc-info { display: grid; min-width: 0; flex: 1; }
 .doc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
