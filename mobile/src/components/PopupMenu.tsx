@@ -17,9 +17,14 @@ export const PopupMenu = ({ open, onClose, children }: PopupMenuProps) => (
   </Modal>
 );
 
-export const MenuItem = ({ label, onPress, danger }: { label: string; onPress: () => void; danger?: boolean }) => (
-  <Pressable accessibilityRole="menuitem" onPress={onPress} style={menuStyles.item}>
-    <Text style={{ color: danger ? colors.danger : colors.text }}>{label}</Text>
+export const MenuItem = ({ label, onPress, danger, disabled }: { label: string; onPress: () => void; danger?: boolean; disabled?: boolean }) => (
+  <Pressable
+    accessibilityRole="menuitem"
+    accessibilityState={{ disabled: Boolean(disabled) }}
+    disabled={disabled}
+    onPress={onPress}
+    style={menuStyles.item}>
+    <Text style={{ color: danger ? colors.danger : colors.text, opacity: disabled ? 0.4 : 1 }}>{label}</Text>
   </Pressable>
 );
 

@@ -13,6 +13,7 @@ import {
 } from '../../../web/shared/file-core';
 import { Avatar } from '../components/Avatar';
 import { searchMessages } from '../../../web/shared/search-core';
+import { MAX_PINS, addPin, canPin, parsePins, pinsNewestFirst, pinsStorageKey, prunePins, removePin } from '../../../web/shared/pin-core';
 import {
   SCHEDULE_ERRORS,
   formatScheduleTime,
@@ -50,7 +51,7 @@ import {
   loadLocalConversationState,
   saveLocalMessages,
 } from '../lib/chatStorage';
-import { account, deleteRemoteFile, e2ee, inbox, isOnline, openConversationPresence, rpc, whenAccountReady } from '../lib/core';
+import { account, deleteRemoteFile, e2ee, inbox, isOnline, openConversationPresence, readSetting, rpc, whenAccountReady, writeSetting } from '../lib/core';
 import { isNetworkError } from '../../../web/shared/session-core';
 import { onQueuedSent, queueMessage, queuedFor, type QueuedMessage } from '../lib/outbox';
 import type { PeerPresence } from '../../../web/shared/presence-core';
@@ -133,6 +134,11 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
   const [searchBusy, setSearchBusy] = useState(false);
   const [searchPool, setSearchPool] = useState<Bubble[]>([]);
   const [flashKey, setFlashKey] = useState('');
+  // pesan tersemat: hanya penanda pesan yang disimpan di HP ini; hilang otomatis bila pesannya sudah tidak ada
+  const [pins, setPins] = useState<string[]>([]);
+  const [pinsReady, setPinsReady] = useState(false);
+  const [pinsOpen, setPinsOpen] = useState(false);
+  const [pinItems, setPinItems] = useState<Bubble[]>([]);
   // kirim terjadwal: tekan lama tombol kirim; server menyimpan ciphertext dan melepasnya pada waktunya
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [scheduleBusy, setScheduleBusy] = useState(false);
@@ -178,6 +184,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
   const hasOlderRef = useRef(false);
   const loadingOlderRef = useRef(false);
   const peerId = conversation.peer_id;
+  const pinSettingKey = () => pinsStorageKey(account.me?.id ?? '', conversation.id);
 
   const updateBubbles = useCallback((updater: (prev: Bubble[]) => Bubble[]) => {
     setBubbles(prev => {
@@ -219,11 +226,49 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     return () => back.remove();
   }, [onBack]);
 
+  const togglePin = (item: Bubble) => {
+    const next = pins.includes(item.key) ? removePin(pins, item.key) : addPin(pins, item.key);
+    setPins(next);
+    void writeSetting(pinSettingKey(), JSON.stringify(next));
+  };
+
+  // Setiap pesan berubah (baru, dihapus, riwayat dibersihkan): buang pin yang pesannya sudah tidak ada, lalu susun daftar pin.
+  useEffect(() => {
+    if (!pinsReady) return;
+    let alive = true;
+    void (async () => {
+      const live = new Set(
+        allMessagesRef.current
+          .filter(m => !m.deleted_at && !deletedIdsRef.current.has(m.client_msg_id) && m.seq > clearedUpToSeqRef.current)
+          .map(m => m.client_msg_id),
+      );
+      const kept = prunePins(pins, live);
+      if (kept.length !== pins.length) {
+        setPins(kept);
+        void writeSetting(pinSettingKey(), JSON.stringify(kept));
+        return;
+      }
+      const byKey = new Map(allMessagesRef.current.map(m => [m.client_msg_id, m]));
+      const rows = pinsNewestFirst(pins).flatMap(key => byKey.get(key) ?? []);
+      const items = await Promise.all(rows.map(toBubble));
+      if (!alive) return;
+      setPinItems(items);
+      if (items.length === 0) setPinsOpen(false);
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bubbles, pins, pinsReady, toBubble]);
+
   useEffect(() => {
     let alive = true;
     void (async () => {
       const myId = account.me?.id ?? '';
       try {
+        const savedPins = parsePins(await readSetting(pinSettingKey()));
+        if (!alive) return;
+        setPins(savedPins);
         const localState = myId
           ? await loadLocalConversationState(myId, conversation.id)
           : { messages: [], deletedIds: new Set<string>(), clearedUpToSeq: 0 };
@@ -289,6 +334,8 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         await showQueued();
       } catch {
         if (alive) setError('Gagal memuat percakapan');
+      } finally {
+        if (alive) setPinsReady(true);
       }
     })().catch(() => {});
 
@@ -734,6 +781,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
   /** Lompat ke pesan hasil pencarian; bila belum dimuat di layar, muat dari cache lokal sampai pesan itu. */
   const goToMessage = async (key: string) => {
     closeSearch();
+    setPinsOpen(false);
     if (!bubblesRef.current.some(b => b.key === key)) {
       const ordered = allMessagesRef.current
         .filter(m => !deletedIdsRef.current.has(m.client_msg_id) && m.seq > clearedUpToSeqRef.current)
@@ -868,6 +916,38 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
           />
         </View>
       ) : null}
+      {pinItems.length > 0 ? (
+        <View style={styles.pinBar}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Pesan tersemat, ${pinItems.length} dari ${MAX_PINS}`}
+            accessibilityState={{ expanded: pinsOpen }}
+            onPress={() => setPinsOpen(open => !open)}
+            style={styles.pinTop}>
+            <Text style={{ color: colors.accent }}>📌</Text>
+            <Text numberOfLines={1} style={{ flex: 1, color: colors.text, fontSize: 13 }}>{replySnippet(pinItems[0])}</Text>
+            <Text style={[ui.muted, { fontSize: 12 }]}>{pinItems.length}/{MAX_PINS}</Text>
+          </Pressable>
+          {pinsOpen ? (
+            <FlatList
+              data={pinItems}
+              keyExtractor={pin => pin.key}
+              style={{ maxHeight: 280 }}
+              renderItem={({ item: pin }) => (
+                <View style={styles.pinItem}>
+                  <Pressable onPress={() => goToMessage(pin.key)} accessibilityRole="button" style={[styles.hit, { flex: 1, borderBottomWidth: 0 }]}>
+                    <Text style={[ui.muted, { width: 56, fontSize: 12 }]}>{formatTime(pin.createdAt)}</Text>
+                    <Text style={{ flex: 1, color: colors.text, fontSize: 14 }} numberOfLines={2}>{replySnippet(pin)}</Text>
+                  </Pressable>
+                  <Pressable onPress={() => togglePin(pin)} accessibilityRole="button" accessibilityLabel="Lepas pin" hitSlop={8} style={{ padding: 8 }}>
+                    <Text style={{ color: colors.muted, fontSize: 18 }}>×</Text>
+                  </Pressable>
+                </View>
+              )}
+            />
+          ) : null}
+        </View>
+      ) : null}
       <PopupMenu open={menuOpen} onClose={() => setMenuOpen(false)}>
         <MenuItem label="Hapus riwayat chat di HP ini" onPress={() => closeMenuThen(confirmClearChat)} />
         <MenuItem
@@ -884,6 +964,15 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
             const target = actionsFor;
             setActionsFor(null);
             if (target) setReplyingTo(target);
+          }}
+        />
+        <MenuItem
+          label={actionsFor && pins.includes(actionsFor.key) ? 'Lepas pin' : canPin(pins) ? 'Sematkan' : `Sematkan (penuh, maks ${MAX_PINS})`}
+          disabled={!actionsFor || (!pins.includes(actionsFor.key) && !canPin(pins))}
+          onPress={() => {
+            const target = actionsFor;
+            setActionsFor(null);
+            if (target) togglePin(target);
           }}
         />
         {actionsFor?.mine ? (
@@ -1140,6 +1229,9 @@ const styles = themed(() => ({
   dayChip: { overflow: 'hidden', paddingVertical: 3, paddingHorizontal: 12, borderRadius: 12, backgroundColor: `${colors.muted}26`, color: colors.muted, fontSize: 12 },
   searchPanel: { gap: 8, padding: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, backgroundColor: colors.surface },
   hit: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, paddingVertical: 9, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  pinBar: { gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, backgroundColor: colors.surface },
+  pinTop: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 36 },
+  pinItem: { flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   hitMatch: { backgroundColor: `${colors.accent}40`, fontWeight: '700' },
   voiceRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 220 },
   voiceButton: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },

@@ -16,6 +16,7 @@ import {
   replySnippet,
   sliceMessagesPage,
 } from '#shared/chat-core'
+import { MAX_PINS, addPin, canPin, parsePins, pinsNewestFirst, pinsStorageKey, prunePins, removePin } from '#shared/pin-core'
 import { createConversationPresence, type PeerPresence } from '#shared/presence-core'
 import { searchMessages } from '#shared/search-core'
 import {
@@ -97,6 +98,52 @@ const flashKey = ref('')
 const MAX_JUMP_MESSAGES = 1000
 
 const searchHits = computed(() => (searchOpen.value ? searchMessages(searchPool.value, searchQuery.value) : []))
+
+// ---- pesan tersemat: hanya penanda pesan yang disimpan di browser ini; hilang otomatis bila pesannya sudah tidak ada ----
+const pins = ref<string[]>([])
+const pinsOpen = ref(false)
+const pinsReady = ref(false)
+const pinBubbles = ref<Bubble[]>([])
+const pinStorageKey = () => `seru24:${pinsStorageKey(account.me?.id ?? '', conversationId)}`
+const livePinKeys = computed(
+  () => new Set(allMessages.value.filter((m) => !m.deleted_at && !deletedIds.value.has(m.client_msg_id) && m.seq > clearedUpToSeq.value).map((m) => m.client_msg_id)),
+)
+const pinFull = computed(() => !canPin(pins.value))
+const savePins = () => {
+  try {
+    localStorage.setItem(pinStorageKey(), JSON.stringify(pins.value))
+  } catch {
+    // penyimpanan penuh atau diblokir: pin tetap berlaku selama halaman terbuka
+  }
+}
+const loadPins = () => {
+  try {
+    pins.value = parsePins(localStorage.getItem(pinStorageKey()))
+  } catch {
+    pins.value = []
+  }
+}
+const isPinned = (b: Bubble) => pins.value.includes(b.key)
+const togglePin = (b: Bubble) => {
+  pins.value = isPinned(b) ? removePin(pins.value, b.key) : addPin(pins.value, b.key)
+  savePins()
+}
+const rebuildPinBubbles = async () => {
+  const byKey = new Map(allMessages.value.map((m) => [m.client_msg_id, m]))
+  const rows = pinsNewestFirst(pins.value).flatMap((key) => byKey.get(key) ?? [])
+  pinBubbles.value = await Promise.all(rows.map(toBubble))
+  if (pinBubbles.value.length === 0) pinsOpen.value = false
+}
+// pin dibersihkan setelah cache dan server selesai dimuat, supaya pesan yang belum sempat termuat tidak ikut terbuang
+watch([pinsReady, livePinKeys], () => {
+  if (!pinsReady.value) return
+  const kept = prunePins(pins.value, livePinKeys.value)
+  if (kept.length !== pins.value.length) {
+    pins.value = kept
+    savePins()
+  }
+})
+watch([pins, pinsReady, allMessages], () => { void rebuildPinBubbles() })
 const reportReason = ref('')
 const reportDone = ref(false)
 const scroller = ref<HTMLElement | null>(null)
@@ -171,6 +218,7 @@ const fetchPage = (beforeSeq?: number) =>
 
 const load = async () => {
   const myId = account.me?.id ?? ''
+  loadPins()
   // pesan terbaru diminta bersamaan dengan data percakapan (tidak saling menunggu); hasilnya dipakai di bawah
   const firstPage = fetchPage().then((rows) => ({ rows }), (cause: unknown) => ({ cause }))
   let list: Conversation[] = []
@@ -224,6 +272,8 @@ const load = async () => {
     markRead()
   } catch {
     if (allMessages.value.length === 0) throw new Error('Gagal memuat pesan')
+  } finally {
+    pinsReady.value = true
   }
 }
 
@@ -861,6 +911,7 @@ const bubbleElement = (key: string) => scroller.value?.querySelector<HTMLElement
 /** Lompat ke pesan hasil pencarian; bila belum dimuat di layar, muat dari cache lokal sampai pesan itu. */
 const goToMessage = async (key: string) => {
   closeSearch()
+  pinsOpen.value = false
   let target = bubbleElement(key)
   if (!target) {
     const ordered = allMessages.value
@@ -919,6 +970,23 @@ onMounted(() => load().then(() => loadScheduled()).catch(() => { error.value = '
       </button>
       <button type="button" class="ghost" :aria-expanded="showSafety" @click="showSafety = !showSafety">Keamanan</button>
     </header>
+
+    <section v-if="pinBubbles.length" class="panel pinbar" aria-label="Pesan tersemat">
+      <button type="button" class="pin-top" :aria-expanded="pinsOpen" @click="pinsOpen = !pinsOpen">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M9 3h6l-1 6 3 3v2h-4v6l-1 1-1-1v-6H7v-2l3-3z" /></svg>
+        <span class="pin-text">{{ replySnippet(pinBubbles[0]) }}</span>
+        <span class="muted pin-count">{{ pinBubbles.length }}/{{ MAX_PINS }}</span>
+      </button>
+      <ul v-if="pinsOpen" class="hits">
+        <li v-for="p in pinBubbles" :key="p.key" class="pin-item">
+          <button type="button" class="hit" @click="goToMessage(p.key)">
+            <span class="hit-time">{{ formatTime(p.createdAt) }}</span>
+            <span class="hit-text">{{ replySnippet(p) }}</span>
+          </button>
+          <button type="button" class="ghost icon" aria-label="Lepas pin" title="Lepas pin" @click="togglePin(p)">&times;</button>
+        </li>
+      </ul>
+    </section>
 
     <section v-if="searchOpen" class="panel search" role="search">
       <div class="row">
@@ -1033,6 +1101,19 @@ onMounted(() => load().then(() => loadScheduled()).catch(() => { error.value = '
             :class="{ read: status(b).read }"
             :aria-label="status(b).read ? 'Dibaca' : 'Terkirim'"
           >{{ status(b).ticks }}</span>
+          <button
+            v-if="b.id && !b.pending && !b.deleted"
+            type="button"
+            class="icon-pin"
+            :class="{ on: isPinned(b) }"
+            :aria-pressed="isPinned(b)"
+            :disabled="!isPinned(b) && pinFull"
+            :aria-label="isPinned(b) ? 'Lepas pin' : 'Sematkan pesan'"
+            :title="isPinned(b) ? 'Lepas pin' : pinFull ? `Maksimal ${MAX_PINS} pin, lepas satu dulu` : 'Sematkan'"
+            @click="togglePin(b)"
+          >
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M9 3h6l-1 6 3 3v2h-4v6l-1 1-1-1v-6H7v-2l3-3z" /></svg>
+          </button>
           <button
             v-if="b.id && !b.pending && !b.deleted"
             type="button"
@@ -1203,6 +1284,18 @@ onMounted(() => load().then(() => loadScheduled()).catch(() => { error.value = '
 .hit-time { color: var(--muted); font-size: 12px; }
 .hit-text { overflow-wrap: anywhere; font-size: 14px; }
 .hit mark { padding: 0 2px; border-radius: 3px; background: color-mix(in srgb, var(--accent) 28%, transparent); color: inherit; }
+.pinbar { display: grid; gap: 6px; padding: 6px 10px; }
+.pin-top { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 0; border: 0; background: none; color: inherit; text-align: left; }
+.pin-top svg { flex: none; color: var(--accent); }
+.pin-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.pin-count { font-size: 12px; }
+.pin-item { display: flex; align-items: center; gap: 4px; border-bottom: 1px solid var(--border); }
+.pin-item .hit { flex: 1; border-bottom: 0; }
+.icon-pin { display: grid; place-items: center; width: 22px; height: 22px; min-height: 22px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); opacity: 0; transition: opacity .12s, color .12s; }
+.bubble:hover .icon-pin, .icon-pin.on, .icon-pin:focus-visible { opacity: 1; }
+.icon-pin.on { color: var(--accent); }
+.icon-pin:disabled { cursor: not-allowed; opacity: .35; }
+@media (hover: none) { .icon-pin { opacity: .7; } }
 .bubble.flash { animation: flash-pulse 1.6s ease-out; }
 @keyframes flash-pulse { 0%, 35% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 55%, transparent); } 100% { box-shadow: 0 0 0 0 transparent; } }
 @media (prefers-reduced-motion: reduce) { .bubble.flash { animation: none; box-shadow: 0 0 0 2px var(--accent); } }

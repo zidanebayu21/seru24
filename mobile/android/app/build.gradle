@@ -92,8 +92,8 @@ android {
         applicationId "id.seru24.chat"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 16
-        versionName "1.16"
+        versionCode 17
+        versionName "1.17"
     }
     signingConfigs {
         debug {
