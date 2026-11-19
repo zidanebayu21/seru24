@@ -12,6 +12,7 @@ import {
   type FileMessageBody,
 } from '../../../web/shared/file-core';
 import { Avatar } from '../components/Avatar';
+import { searchMessages } from '../../../web/shared/search-core';
 import {
   CHAT_MOBILE_PREFETCH_SCREENS,
   CHAT_PAGE_SIZE,
@@ -19,6 +20,7 @@ import {
   bubbleStatus,
   changedMessages,
   formatClock,
+  formatTime,
   formatDayLabel,
   isSameDay,
   isIncomingRequest,
@@ -113,6 +115,14 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
   const [error, setError] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [actionsFor, setActionsFor] = useState<Bubble | null>(null);
+
+  // cari pesan: hanya di HP (cache lokal yang didekripsi di memori), tidak pernah memanggil server
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchBusy, setSearchBusy] = useState(false);
+  const [searchPool, setSearchPool] = useState<Bubble[]>([]);
+  const [flashKey, setFlashKey] = useState('');
+  const searchHits = useMemo(() => (searchOpen ? searchMessages(searchPool, searchQuery) : []), [searchOpen, searchPool, searchQuery]);
   const [voice, setVoice] = useState<VoiceState | null>(null);
 
   // status pemutar suara dari modul native; hanya satu pesan suara diputar pada satu waktu
@@ -600,6 +610,50 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     if (text) presenceRef.current?.notifyTyping();
   };
 
+  /** Dekripsi seluruh pesan yang tersimpan di HP ini sekali per sesi pencarian (hanya di memori). */
+  const openSearch = async () => {
+    setSearchOpen(true);
+    setSearchBusy(true);
+    try {
+      const rows = allMessagesRef.current.filter(m => !deletedIdsRef.current.has(m.client_msg_id) && m.seq > clearedUpToSeqRef.current);
+      const out: Bubble[] = [];
+      for (let i = 0; i < rows.length; i += 200) out.push(...(await Promise.all(rows.slice(i, i + 200).map(toBubble))));
+      setSearchPool(out);
+    } finally {
+      setSearchBusy(false);
+    }
+  };
+
+  const closeSearch = () => {
+    setSearchOpen(false);
+    setSearchQuery('');
+    setSearchPool([]);
+  };
+
+  /** Lompat ke pesan hasil pencarian; bila belum dimuat di layar, muat dari cache lokal sampai pesan itu. */
+  const goToMessage = async (key: string) => {
+    closeSearch();
+    if (!bubblesRef.current.some(b => b.key === key)) {
+      const ordered = allMessagesRef.current
+        .filter(m => !deletedIdsRef.current.has(m.client_msg_id) && m.seq > clearedUpToSeqRef.current)
+        .sort((a, b) => a.seq - b.seq);
+      const index = ordered.findIndex(m => m.client_msg_id === key);
+      if (index < 0) return;
+      const start = Math.max(0, index - 10);
+      const loaded = await Promise.all(ordered.slice(start, start + 1000).map(toBubble));
+      const pending = bubblesRef.current.filter(b => b.pending);
+      hasOlderRef.current = start > 0 || !serverExhaustedRef.current;
+      updateBubbles(() => [...loaded, ...pending]);
+    }
+    setFlashKey(key);
+    setTimeout(() => setFlashKey(current => (current === key ? '' : current)), 1800);
+    // beri waktu daftar menyusun ulang, lalu gulir ke pesan (inverted: indeks dihitung dari yang terbaru)
+    setTimeout(() => {
+      const index = [...bubblesRef.current].reverse().findIndex(b => b.key === key);
+      if (index >= 0) listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: true });
+    }, 200);
+  };
+
   /** Hapus pesan bersifat permanen untuk kedua pihak (dokumen ikut dihapus dari server): minta konfirmasi dulu. */
   const confirmRemove = (item: Bubble) => {
     Alert.alert(
@@ -660,6 +714,14 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         </View>
         <Pressable
           accessibilityRole="button"
+          accessibilityLabel="Cari pesan"
+          onPress={() => (searchOpen ? closeSearch() : openSearch())}
+          hitSlop={8}
+          style={{ paddingHorizontal: 8, paddingVertical: 8 }}>
+          <Text style={{ color: colors.accent, fontWeight: '600' }}>Cari</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
           accessibilityLabel="Menu percakapan"
           onPress={() => setMenuOpen(true)}
           hitSlop={8}
@@ -667,6 +729,44 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
           <Text style={{ fontSize: 22, lineHeight: 22, color: colors.text }}>⋮</Text>
         </Pressable>
       </View>
+      {searchOpen ? (
+        <View style={styles.searchPanel}>
+          <View style={ui.row}>
+            <TextInput
+              style={[ui.input, { flex: 1 }]}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder="Cari di percakapan ini"
+              placeholderTextColor={colors.muted}
+              autoFocus
+              autoCorrect={false}
+              returnKeyType="search"
+            />
+            <Pressable onPress={closeSearch} accessibilityRole="button" accessibilityLabel="Tutup pencarian" hitSlop={8}>
+              <Text style={{ color: colors.accent, fontWeight: '600' }}>Tutup</Text>
+            </Pressable>
+          </View>
+          <Text style={ui.muted}>Pencarian hanya di HP ini; tidak memakai server.</Text>
+          {searchBusy ? <Text style={ui.muted}>Menyiapkan pesan…</Text> : null}
+          {!searchBusy && searchQuery.trim() && searchHits.length === 0 ? <Text style={ui.muted}>Tidak ada pesan yang cocok.</Text> : null}
+          <FlatList
+            data={searchHits}
+            keyExtractor={hit => hit.key}
+            keyboardShouldPersistTaps="handled"
+            style={{ maxHeight: 280 }}
+            renderItem={({ item: hit }) => (
+              <Pressable onPress={() => goToMessage(hit.key)} accessibilityRole="button" style={styles.hit}>
+                <Text style={[ui.muted, { width: 56, fontSize: 12 }]}>{formatTime(hit.createdAt)}</Text>
+                <Text style={{ flex: 1, color: colors.text, fontSize: 14 }}>
+                  {hit.before}
+                  <Text style={styles.hitMatch}>{hit.match}</Text>
+                  {hit.after}
+                </Text>
+              </Pressable>
+            )}
+          />
+        </View>
+      ) : null}
       <PopupMenu open={menuOpen} onClose={() => setMenuOpen(false)}>
         <MenuItem label="Hapus riwayat chat di HP ini" onPress={() => closeMenuThen(confirmClearChat)} />
         <MenuItem
@@ -724,6 +824,11 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         ref={listRef}
         inverted
         data={reversedBubbles}
+        onScrollToIndexFailed={info => {
+          // tinggi gelembung belum terukur: gulir kira-kira dulu, lalu coba lagi
+          listRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: false });
+          setTimeout(() => listRef.current?.scrollToIndex({ index: info.index, viewPosition: 0.5, animated: true }), 150);
+        }}
         keyExtractor={b => b.key}
         contentContainerStyle={styles.listContent}
         onEndReached={loadOlder}
@@ -751,6 +856,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
               styles.bubble,
               item.mine ? styles.mine : styles.theirs,
               item.failed ? { borderColor: colors.danger, borderWidth: 1.5 } : null,
+              flashKey === item.key ? { borderColor: colors.accent, borderWidth: 2 } : null,
               reversedBubbles[index + 1] && reversedBubbles[index + 1]!.mine === item.mine && isSameDay(reversedBubbles[index + 1]!.createdAt, item.createdAt)
                 ? { marginTop: -3 }
                 : null,
@@ -897,6 +1003,9 @@ const styles = themed(() => ({
   bubble: { maxWidth: '82%', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 18, gap: 2 },
   dayWrap: { alignItems: 'center', marginVertical: 10 },
   dayChip: { overflow: 'hidden', paddingVertical: 3, paddingHorizontal: 12, borderRadius: 12, backgroundColor: `${colors.muted}26`, color: colors.muted, fontSize: 12 },
+  searchPanel: { gap: 8, padding: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, backgroundColor: colors.surface },
+  hit: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, paddingVertical: 9, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  hitMatch: { backgroundColor: `${colors.accent}40`, fontWeight: '700' },
   voiceRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 220 },
   voiceButton: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
   voiceGlyph: { color: colors.accentText, fontSize: 13, fontWeight: '700' },

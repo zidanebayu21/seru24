@@ -17,6 +17,7 @@ import {
   sliceMessagesPage,
 } from '#shared/chat-core'
 import { createConversationPresence, type PeerPresence } from '#shared/presence-core'
+import { searchMessages } from '#shared/search-core'
 import {
   createTransferMeter,
   formatClockSeconds,
@@ -71,6 +72,17 @@ const error = ref('')
 const hasOlder = ref(false)
 const loadingOlder = ref(false)
 const showSafety = ref(false)
+
+// ---- cari pesan: hanya di perangkat (cache lokal yang didekripsi di memori), tidak pernah memanggil server ----
+const searchOpen = ref(false)
+const searchQuery = ref('')
+const searchBusy = ref(false)
+const searchPool = ref<Bubble[]>([])
+const searchInput = ref<HTMLInputElement | null>(null)
+const flashKey = ref('')
+const MAX_JUMP_MESSAGES = 1000
+
+const searchHits = computed(() => (searchOpen.value ? searchMessages(searchPool.value, searchQuery.value) : []))
 const reportReason = ref('')
 const reportDone = ref(false)
 const scroller = ref<HTMLElement | null>(null)
@@ -694,6 +706,58 @@ onBeforeUnmount(() => {
   releaseAudio()
 })
 
+/** Dekripsi seluruh pesan yang tersimpan di perangkat ini sekali per sesi pencarian (hanya di memori). */
+const buildSearchPool = async () => {
+  searchBusy.value = true
+  try {
+    const rows = allMessages.value.filter((m) => !deletedIds.value.has(m.client_msg_id) && m.seq > clearedUpToSeq.value)
+    const out: Bubble[] = []
+    for (let i = 0; i < rows.length; i += 200) out.push(...(await Promise.all(rows.slice(i, i + 200).map(toBubble))))
+    searchPool.value = out
+  } finally {
+    searchBusy.value = false
+  }
+}
+
+const openSearch = async () => {
+  searchOpen.value = true
+  await nextTick()
+  searchInput.value?.focus()
+  await buildSearchPool()
+}
+
+const closeSearch = () => {
+  searchOpen.value = false
+  searchQuery.value = ''
+  searchPool.value = []
+}
+
+const bubbleElement = (key: string) => scroller.value?.querySelector<HTMLElement>(`[data-key="${key}"]`) ?? null
+
+/** Lompat ke pesan hasil pencarian; bila belum dimuat di layar, muat dari cache lokal sampai pesan itu. */
+const goToMessage = async (key: string) => {
+  closeSearch()
+  let target = bubbleElement(key)
+  if (!target) {
+    const ordered = allMessages.value
+      .filter((m) => !deletedIds.value.has(m.client_msg_id) && m.seq > clearedUpToSeq.value)
+      .sort((a, b) => a.seq - b.seq)
+    const index = ordered.findIndex((m) => m.client_msg_id === key)
+    if (index < 0) return
+    const start = Math.max(0, index - 10)
+    const pending = bubbles.value.filter((b) => b.pending)
+    bubbles.value = [...(await Promise.all(ordered.slice(start, start + MAX_JUMP_MESSAGES).map(toBubble))), ...pending]
+    hasOlder.value = start > 0 || !serverExhausted.value
+    await nextTick()
+    target = bubbleElement(key)
+  }
+  target?.scrollIntoView({ block: 'center' })
+  flashKey.value = key
+  setTimeout(() => {
+    if (flashKey.value === key) flashKey.value = ''
+  }, 1800)
+}
+
 const startReply = (b: Bubble) => {
   replyingTo.value = b
   nextTick(() => document.querySelector<HTMLTextAreaElement>('.composer textarea')?.focus())
@@ -726,8 +790,37 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
         <strong>{{ peerLabel(conversation) }}</strong>
         <p class="muted" :class="{ typing: peerPresence.typing }">{{ subtitle }}</p>
       </div>
+      <button type="button" class="ghost icon" aria-label="Cari pesan" title="Cari pesan" :aria-expanded="searchOpen" @click="searchOpen ? closeSearch() : openSearch()">
+        <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5" /><path d="M16 16l4.5 4.5" /></svg>
+      </button>
       <button type="button" class="ghost" :aria-expanded="showSafety" @click="showSafety = !showSafety">Keamanan</button>
     </header>
+
+    <section v-if="searchOpen" class="panel search" role="search">
+      <div class="row">
+        <input
+          ref="searchInput"
+          v-model="searchQuery"
+          type="search"
+          placeholder="Cari di percakapan ini"
+          autocomplete="off"
+          aria-label="Cari pesan"
+          @keydown.esc="closeSearch"
+        >
+        <button type="button" class="ghost" @click="closeSearch">Tutup</button>
+      </div>
+      <p class="muted">Pencarian hanya di perangkat ini; tidak memakai server.</p>
+      <p v-if="searchBusy" class="muted">Menyiapkan pesan…</p>
+      <p v-else-if="searchQuery.trim() && searchHits.length === 0" class="muted">Tidak ada pesan yang cocok.</p>
+      <ul v-if="searchHits.length" class="hits">
+        <li v-for="hit in searchHits" :key="hit.key">
+          <button type="button" class="hit" @click="goToMessage(hit.key)">
+            <span class="hit-time">{{ formatTime(hit.createdAt) }}</span>
+            <span class="hit-text">{{ hit.before }}<mark>{{ hit.match }}</mark>{{ hit.after }}</span>
+          </button>
+        </li>
+      </ul>
+    </section>
 
     <section v-if="showSafety" class="panel stack">
       <div v-if="keyStatus.status !== 'missing'">
@@ -769,7 +862,7 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
       <button v-else-if="hasOlder" type="button" class="older" @click="loadOlder">Muat pesan lama</button>
       <template v-for="(b, i) in bubbles" :key="b.key">
       <div v-if="dayLabelAt(i)" class="day"><span>{{ dayLabelAt(i) }}</span></div>
-      <div class="bubble" :class="{ mine: b.mine, failed: b.failed, tight: isTight(i) }">
+      <div class="bubble" :data-key="b.key" :class="{ mine: b.mine, failed: b.failed, tight: isTight(i), flash: flashKey === b.key }">
         <div v-if="b.replyTo && !b.deleted" class="quote">
           <strong v-if="quoteOf(b).who">{{ quoteOf(b).who }}</strong>
           <span>{{ quoteOf(b).snippet }}</span>
@@ -932,6 +1025,18 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
 .ghost:hover:not(:disabled), .ghost[aria-expanded="true"] { background: color-mix(in srgb, var(--text) 7%, transparent); border-color: transparent; }
 .who { flex: 1; min-width: 0; }
 .who p { margin: 0; }
+.search { display: grid; gap: 8px; }
+.search .row { gap: 8px; }
+.ghost.icon { display: grid; place-items: center; width: 36px; padding: 0; }
+.hits { display: grid; max-height: 40vh; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.hit { display: grid; grid-template-columns: 4.5em 1fr; gap: 10px; width: 100%; padding: 9px 8px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: none; text-align: left; }
+.hit:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.hit-time { color: var(--muted); font-size: 12px; }
+.hit-text { overflow-wrap: anywhere; font-size: 14px; }
+.hit mark { padding: 0 2px; border-radius: 3px; background: color-mix(in srgb, var(--accent) 28%, transparent); color: inherit; }
+.bubble.flash { animation: flash-pulse 1.6s ease-out; }
+@keyframes flash-pulse { 0%, 35% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 55%, transparent); } 100% { box-shadow: 0 0 0 0 transparent; } }
+@media (prefers-reduced-motion: reduce) { .bubble.flash { animation: none; box-shadow: 0 0 0 2px var(--accent); } }
 .panel { padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
 .panel select { width: auto; }
 .code { display: block; font-size: 16px; letter-spacing: 1px; word-break: break-word; }
