@@ -17,7 +17,7 @@ const openDb = () =>
     const request = indexedDB.open(DB_NAME, 1)
     request.onupgradeneeded = () => request.result.createObjectStore(STORE)
     request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error)
+    request.onerror = () => reject(request.error ?? new Error('Gagal membuka IndexedDB keystore'))
   })
 
 const withStore = async <T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>) => {
@@ -26,7 +26,7 @@ const withStore = async <T>(mode: IDBTransactionMode, run: (store: IDBObjectStor
     return await new Promise<T>((resolve, reject) => {
       const request = run(db.transaction(STORE, mode).objectStore(STORE))
       request.onsuccess = () => resolve(request.result)
-      request.onerror = () => reject(request.error)
+      request.onerror = () => reject(request.error ?? new Error('Operasi IndexedDB keystore gagal'))
     })
   } finally {
     db.close()

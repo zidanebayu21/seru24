@@ -1,5 +1,6 @@
 import net from 'node:net'
 import tls from 'node:tls'
+import { randomBytes } from 'node:crypto'
 import type { FileMaintenance } from './file-maintenance'
 
 export interface SmtpConfig {
@@ -216,15 +217,19 @@ export const buildDailyStatsEmail = (report: DailyStatsReport, now = new Date())
 }
 
 const extractAddress = (input: string) => {
-  const match = /<([^>]+)>/.exec(input)
-  return (match?.[1] ?? input).trim()
+  const start = input.indexOf('<')
+  const end = input.indexOf('>', start + 1)
+  if (start !== -1 && end !== -1) {
+    return input.slice(start + 1, end).trim()
+  }
+  return input.trim()
 }
 
 const chunkBase64 = (text: string) =>
   Buffer.from(text, 'utf8').toString('base64').replace(/(.{76})/g, '$1\r\n')
 
 const buildMimePayload = (from: string, to: string[], subject: string, text: string, html: string) => {
-  const boundary = `seru24_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
+  const boundary = `seru24_${Date.now().toString(36)}_${randomBytes(6).toString('hex')}`
   const encodedSubject = `=?UTF-8?B?${Buffer.from(subject, 'utf8').toString('base64')}?=`
   return [
     `From: ${from}`,

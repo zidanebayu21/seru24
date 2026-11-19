@@ -76,8 +76,11 @@ export const fromBase64 = (value: string): Uint8Array => {
 }
 
 /** Base64url tanpa padding (RFC 4648 bagian 5), aman untuk URL dan format compact. */
-export const toBase64Url = (bytes: Uint8Array): string =>
-  toBase64(bytes).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
+export const toBase64Url = (bytes: Uint8Array): string => {
+  const b64 = toBase64(bytes).replaceAll('+', '-').replaceAll('/', '_')
+  const pad = b64.indexOf('=')
+  return pad === -1 ? b64 : b64.slice(0, pad)
+}
 
 export const fromBase64Url = (value: string): Uint8Array => {
   const base64 = value.replaceAll('-', '+').replaceAll('_', '/')

@@ -124,7 +124,7 @@ export const AccountMenu = ({ onSignedOut }: Props) => {
 
   const openWeb = (path: string) => {
     setOpen(false);
-    Linking.openURL(webUrl(path));
+    void Linking.openURL(webUrl(path)).catch(() => {});
   };
 
   const logout = async () => {

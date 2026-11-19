@@ -36,7 +36,7 @@ export const createInbox = (getClient: () => SupabaseClient, getUserId: () => st
   const closeInbox = () => {
     handlers.clear()
     if (channel) {
-      getClient().removeChannel(channel)
+      void getClient().removeChannel(channel)
       channel = null
     }
   }

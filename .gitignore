@@ -40,5 +40,6 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 .idea/
+.scannerwork/
 .vscode/*
 !.vscode/extensions.json

@@ -97,7 +97,7 @@ const openChatDb = (): Promise<IDBDatabase> =>
       }
       resolve(db)
     }
-    request.onerror = () => reject(request.error)
+    request.onerror = () => reject(request.error ?? new Error('Gagal membuka IndexedDB'))
   })
 
 const withDb = async <T>(run: (db: IDBDatabase) => Promise<T>): Promise<T> => {
@@ -113,13 +113,13 @@ const withDb = async <T>(run: (db: IDBDatabase) => Promise<T>): Promise<T> => {
 const idbReq = <T>(request: IDBRequest<T>): Promise<T> =>
   new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error)
+    request.onerror = () => reject(request.error ?? new Error('Permintaan IndexedDB gagal'))
   })
 
 const idbTxDone = (tx: IDBTransaction): Promise<void> =>
   new Promise((resolve, reject) => {
     tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
+    tx.onerror = () => reject(tx.error ?? new Error('Transaksi IndexedDB gagal'))
     tx.onabort = () => reject(tx.error ?? new Error('Transaksi IndexedDB dibatalkan'))
   })
 
@@ -165,7 +165,7 @@ const deleteByUserIndex = (store: IDBObjectStore, userId: string): Promise<void>
       cursor.delete()
       cursor.continue()
     }
-    req.onerror = () => reject(req.error)
+    req.onerror = () => reject(req.error ?? new Error('Operasi deleteByIndex gagal'))
   })
 
 const deleteByConvIndex = (store: IDBObjectStore, userId: string, conversationId: string): Promise<void> =>
@@ -180,7 +180,7 @@ const deleteByConvIndex = (store: IDBObjectStore, userId: string, conversationId
       cursor.delete()
       cursor.continue()
     }
-    req.onerror = () => reject(req.error)
+    req.onerror = () => reject(req.error ?? new Error('Operasi deleteByConvIndex gagal'))
   })
 
 /** Simpan daftar percakapan ke IndexedDB Chrome (terenkripsi AES-GCM). */

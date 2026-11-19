@@ -27,6 +27,8 @@ import com.facebook.react.modules.core.DeviceEventManagerModule;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -149,24 +151,7 @@ public class FileModule extends ReactContextBaseJavaModule {
             Uri saved = null;
             ContentResolver resolver = getReactApplicationContext().getContentResolver();
             try {
-                long total = (long) sizeBytes + TAG_BITS / 8;
-                Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-                cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(Base64.decode(keyB64, Base64.NO_WRAP), "AES"),
-                    new GCMParameterSpec(TAG_BITS, Base64.decode(ivB64, Base64.NO_WRAP)));
-
-                // potongan hasil dekripsi disimpan apa adanya (tanpa salinan ulang) dan baru ditulis setelah
-                // doFinal memeriksa tag GCM: file yang diubah atau kunci salah gagal di sini dan tidak disimpan
-                List<byte[]> plain = new ArrayList<>();
-                long done = 0;
-                for (int part = 0; done < total; part++) {
-                    byte[] chunk = fetchPart(id, part, apiBase, token);
-                    if (chunk.length == 0) throw new IllegalStateException("Potongan kosong");
-                    byte[] out = cipher.update(chunk);
-                    if (out != null && out.length > 0) plain.add(out);
-                    done += chunk.length;
-                    emitProgress(id, done, total);
-                }
-                plain.add(cipher.doFinal());
+                List<byte[]> plain = fetchAndDecrypt(id, apiBase, token, keyB64, ivB64, sizeBytes);
 
                 ContentValues values = new ContentValues();
                 values.put(MediaStore.Downloads.DISPLAY_NAME, name);
@@ -186,6 +171,56 @@ public class FileModule extends ReactContextBaseJavaModule {
                 promise.resolve(saved.toString());
             } catch (Exception e) {
                 if (saved != null) resolver.delete(saved, null, null);
+                promise.reject("download_error", e.getMessage(), e);
+            }
+        });
+    }
+
+    /**
+     * Unduh per potongan lalu dekripsi. Potongan hasil dekripsi disimpan apa adanya (tanpa salinan ulang) dan baru
+     * dipakai setelah doFinal memeriksa tag GCM: file yang diubah atau kunci salah gagal di sini dan tidak disimpan.
+     */
+    private List<byte[]> fetchAndDecrypt(String id, String apiBase, String token, String keyB64, String ivB64,
+                                         double sizeBytes) throws Exception {
+        long total = (long) sizeBytes + TAG_BITS / 8;
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(Base64.decode(keyB64, Base64.NO_WRAP), "AES"),
+            new GCMParameterSpec(TAG_BITS, Base64.decode(ivB64, Base64.NO_WRAP)));
+
+        List<byte[]> plain = new ArrayList<>();
+        long done = 0;
+        for (int part = 0; done < total; part++) {
+            byte[] chunk = fetchPart(id, part, apiBase, token);
+            if (chunk.length == 0) throw new IllegalStateException("Potongan kosong");
+            byte[] out = cipher.update(chunk);
+            if (out != null && out.length > 0) plain.add(out);
+            done += chunk.length;
+            emitProgress(id, done, total);
+        }
+        plain.add(cipher.doFinal());
+        return plain;
+    }
+
+    /**
+     * Unduh dan dekripsi ke folder cache privat aplikasi (untuk diputar, bukan disimpan ke Download). Hasil: path
+     * file sementara; pemanggil menghapusnya setelah selesai dipakai (AudioModule).
+     */
+    @ReactMethod
+    public void downloadToCache(String id, String apiBase, String token, String keyB64, String ivB64,
+                                double sizeBytes, Promise promise) {
+        EXECUTOR.execute(() -> {
+            File target = null;
+            try {
+                List<byte[]> plain = fetchAndDecrypt(id, apiBase, token, keyB64, ivB64, sizeBytes);
+                File dir = new File(getReactApplicationContext().getCacheDir(), "voice");
+                if (!dir.isDirectory() && !dir.mkdirs()) throw new IllegalStateException("Folder sementara gagal dibuat");
+                target = new File(dir, id + ".audio");
+                try (FileOutputStream out = new FileOutputStream(target)) {
+                    for (byte[] piece : plain) out.write(piece);
+                }
+                promise.resolve(target.getAbsolutePath());
+            } catch (Exception e) {
+                if (target != null) target.delete();
                 promise.reject("download_error", e.getMessage(), e);
             }
         });

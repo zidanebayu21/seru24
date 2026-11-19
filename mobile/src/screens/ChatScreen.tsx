@@ -1,7 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, AppState, BackHandler, FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { MAX_TEXT_LENGTH, randomId } from '../../../web/shared/crypto';
-import { createTransferMeter, formatFileSize, safeFileName, splitByFileLimit, type FileMessageBody } from '../../../web/shared/file-core';
+import {
+  createTransferMeter,
+  formatClockSeconds,
+  formatFileSize,
+  isVoiceFile,
+  safeFileName,
+  splitByFileLimit,
+  voiceSecondsFromName,
+  type FileMessageBody,
+} from '../../../web/shared/file-core';
 import { Avatar } from '../components/Avatar';
 import {
   CHAT_MOBILE_PREFETCH_SCREENS,
@@ -35,6 +44,7 @@ import { onQueuedSent, queueMessage, queuedFor, type QueuedMessage } from '../li
 import type { PeerPresence } from '../../../web/shared/presence-core';
 import { downloadFile, findSavedFile, openSavedFile, pickFiles, uploadFile, type PickedFile } from '../lib/files';
 import { notifyMessageSent } from '../lib/notify';
+import { onVoiceState, pauseVoice, playVoice, resumeVoice, stopVoice, type VoiceState } from '../lib/audio';
 import { Button } from '../components/Button';
 import { MenuItem, PopupMenu } from '../components/PopupMenu';
 import { colors, themed, ui } from '../theme';
@@ -103,6 +113,16 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
   const [error, setError] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [actionsFor, setActionsFor] = useState<Bubble | null>(null);
+  const [voice, setVoice] = useState<VoiceState | null>(null);
+
+  // status pemutar suara dari modul native; hanya satu pesan suara diputar pada satu waktu
+  useEffect(() => {
+    const stop = onVoiceState(setVoice);
+    return () => {
+      stop();
+      stopVoice();
+    };
+  }, []);
   // aplikasi baru dibuka: kunci chat masih dipulihkan di belakang
   const [preparing, setPreparing] = useState(account.status !== 'ready');
   const listRef = useRef<FlatList<Bubble>>(null);
@@ -157,7 +177,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
 
   useEffect(() => {
     let alive = true;
-    (async () => {
+    void (async () => {
       const myId = account.me?.id ?? '';
       try {
         const localState = myId
@@ -225,7 +245,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
       } catch {
         if (alive) setError('Gagal memuat percakapan');
       }
-    })();
+    })().catch(() => {});
 
     /** Gabungkan satu pesan (baru, diedit, atau dihapus) ke cache dan daftar gelembung; null bila diabaikan. */
     const applyMessage = async (msg: ChatMessage): Promise<Bubble | null> => {
@@ -599,6 +619,21 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     ]);
   };
 
+  /** Putar, jeda, atau lanjutkan pesan suara; memutar yang lain otomatis menghentikan yang sedang berjalan. */
+  const toggleVoice = async (item: Bubble) => {
+    const file = item.file;
+    if (!file) return;
+    if (voice?.id === file.id && voice.state === 'playing') return pauseVoice();
+    if (voice?.id === file.id && voice.state === 'paused') return resumeVoice();
+    setVoice({ id: file.id, state: 'loading', positionMs: 0, durationMs: 0 });
+    try {
+      await playVoice(file);
+    } catch {
+      setVoice(null);
+      updateBubble(item.key, { failed: 'Pesan suara gagal dimuat' });
+    }
+  };
+
   /** Tekan lama pada gelembung: balas, atau hapus (pesan sendiri). */
   const showActions = (item: Bubble) => {
     if (!item.id || item.pending || item.deleted) return;
@@ -730,6 +765,34 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
               <Text style={ui.muted}>Pesan dihapus</Text>
             ) : item.text === null ? (
               <Text style={ui.muted}>Pesan tidak dapat dibuka</Text>
+            ) : item.file && isVoiceFile(item.file) ? (
+              <View style={styles.voiceRow}>
+                <Pressable
+                  onPress={() => toggleVoice(item)}
+                  disabled={item.pending}
+                  accessibilityRole="button"
+                  accessibilityLabel={voice?.id === item.file.id && voice.state === 'playing' ? 'Jeda' : 'Putar pesan suara'}
+                  style={styles.voiceButton}>
+                  <Text style={styles.voiceGlyph}>{voice?.id === item.file.id && voice.state === 'playing' ? '❚❚' : '▶'}</Text>
+                </Pressable>
+                <View style={styles.voiceTrack}>
+                  <View
+                    style={[
+                      styles.voiceFill,
+                      {
+                        width: `${voice?.id === item.file.id && voice.durationMs > 0 ? Math.min(100, (voice.positionMs / voice.durationMs) * 100) : 0}%`,
+                      },
+                    ]}
+                  />
+                </View>
+                <Text style={[ui.muted, { fontSize: 12, minWidth: 40, textAlign: 'right' }]}>
+                  {voice?.id === item.file.id && voice.state === 'loading'
+                    ? 'Memuat…'
+                    : formatClockSeconds(
+                        voice?.id === item.file.id && (voice.state === 'playing' || voice.state === 'paused') ? voice.positionMs / 1000 : (voiceSecondsFromName(item.file.name) ?? 0),
+                      )}
+                </Text>
+              </View>
             ) : item.file ? (
               <View style={[ui.row, { gap: 10 }]}>
                 <View style={styles.docTile}>
@@ -834,6 +897,11 @@ const styles = themed(() => ({
   bubble: { maxWidth: '82%', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 18, gap: 2 },
   dayWrap: { alignItems: 'center', marginVertical: 10 },
   dayChip: { overflow: 'hidden', paddingVertical: 3, paddingHorizontal: 12, borderRadius: 12, backgroundColor: `${colors.muted}26`, color: colors.muted, fontSize: 12 },
+  voiceRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 220 },
+  voiceButton: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
+  voiceGlyph: { color: colors.accentText, fontSize: 13, fontWeight: '700' },
+  voiceTrack: { flex: 1, height: 4, borderRadius: 2, backgroundColor: `${colors.muted}40`, overflow: 'hidden' },
+  voiceFill: { height: 4, backgroundColor: colors.accent },
   docTile: { width: 42, height: 42, borderRadius: 10, backgroundColor: `${colors.accent}24`, alignItems: 'center', justifyContent: 'center' },
   docExt: { color: colors.accent, fontWeight: '700', fontSize: 11 },
   listContent: { padding: 16, gap: 6, flexGrow: 1, justifyContent: 'flex-end' },

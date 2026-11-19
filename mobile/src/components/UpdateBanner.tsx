@@ -14,9 +14,9 @@ export const UpdateBanner = () => {
 
   useEffect(() => {
     let alive = true;
-    checkForUpdate().then(found => {
+    void checkForUpdate().then(found => {
       if (alive) setRelease(found);
-    });
+    }).catch(() => {});
     return () => {
       alive = false;
     };

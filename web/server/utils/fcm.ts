@@ -25,8 +25,7 @@ const TOKEN_REFRESH_MARGIN_MS = 60_000
 
 let cachedToken: TokenCache | null = null
 
-const base64Url = (input: Buffer | string) =>
-  Buffer.from(input).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+const base64Url = (input: Buffer | string) => Buffer.from(input).toString('base64url')
 
 /** Baca kredensial service account FCM dari runtimeConfig; null bila belum dikonfigurasi. */
 export const parseFcmConfig = (raw: FcmRuntimeConfig): FcmConfig | null => {

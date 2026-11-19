@@ -156,7 +156,8 @@ onMounted(() => {
         <button type="button" :disabled="storageBusy" @click="importInput?.click()">
           Impor riwayat dari file
         </button>
-        <input ref="importInput" type="file" accept=".txt,text/plain" hidden @change="importChats">
+        <label for="profil-import-input" class="sr-only">Impor riwayat dari file</label>
+        <input id="profil-import-input" ref="importInput" type="file" accept=".txt,text/plain" hidden @change="importChats">
         <button type="button" :disabled="storageBusy" @click="clearChats">
           Bersihkan semua chat lokal
         </button>

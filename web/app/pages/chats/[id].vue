@@ -861,7 +861,8 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
       </button>
     </div>
     <form v-else class="composer row" @submit.prevent="send">
-      <input ref="fileInput" type="file" multiple hidden @change="onFilesPicked">
+      <label for="chat-file-input" class="sr-only">Lampirkan file</label>
+      <input id="chat-file-input" ref="fileInput" type="file" multiple hidden @change="onFilesPicked">
       <button
         type="button"
         class="attach"
@@ -872,7 +873,9 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
       >
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9" /></svg>
       </button>
+      <label for="chat-message-draft" class="sr-only">Tulis pesan</label>
       <textarea
+        id="chat-message-draft"
         v-model="draft"
         rows="1"
         :maxlength="MAX_TEXT_LENGTH"

@@ -73,9 +73,9 @@ const App = () => {
   useEffect(() => {
     if (!signedIn) return;
     let cancelled = false;
-    loadNotifySetting().then(() => {
+    void loadNotifySetting().then(() => {
       if (!cancelled) startNotifications(() => activeConversation.current);
-    });
+    }).catch(() => {});
     return () => {
       cancelled = true;
       stopNotifications();

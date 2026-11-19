@@ -25,6 +25,7 @@ interface NativeFilesModule {
   downloadAndSave: (
     id: string, apiBase: string, token: string, key: string, iv: string, name: string, mime: string, size: number,
   ) => Promise<string>;
+  downloadToCache: (id: string, apiBase: string, token: string, key: string, iv: string, size: number) => Promise<string>;
   openFile: (uri: string, mime: string) => Promise<void>;
   savedFile: (id: string) => Promise<string | null>;
   saveTextToDownloads: (name: string, text: string) => Promise<string>;
@@ -92,6 +93,15 @@ export const findSavedFile = (id: string): Promise<string | null> =>
 
 /** Buka file lokal dengan aplikasi yang sesuai (PDF, gambar, dll.). */
 export const openSavedFile = (uri: string, mime: string): Promise<void> => requireNative().openFile(uri, mime);
+
+/** Unduh dan dekripsi ke cache privat aplikasi untuk diputar; hasilnya path file sementara. */
+export const downloadToCache = async (file: FileMessageBody, onProgress?: Progress): Promise<string> => {
+  const files = requireNative();
+  const token = await requireToken();
+  return withProgress(file.id, onProgress, () =>
+    files.downloadToCache(file.id, API_BASE_URL, token, file.key, file.iv, file.size),
+  );
+};
 
 /** Unduh, dekripsi, dan simpan ke Download/seru24, lalu buka; hasilnya lokasi file lokal. */
 export const downloadFile = async (file: FileMessageBody, onProgress?: Progress): Promise<string> => {

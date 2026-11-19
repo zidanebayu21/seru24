@@ -32,7 +32,7 @@ describe('enkripsi transport', () => {
   it('ditolak bila isi diubah', () => {
     const sealed = sealRequest(server.publicKey, keyId, { a: 1 })
     const [id, pub, body] = sealed.compact.split('.')
-    const tampered = `${id}.${pub}.${body!.slice(0, -2)}${body!.endsWith('A') ? 'B' : 'A'}${body!.slice(-1)}`
+    const tampered = `${id}.${pub}.${body![0] === 'A' ? 'B' : 'A'}${body!.slice(1)}`
     expect(() => openRequest(tampered, server.secretKey, keyId)).toThrow()
   })
 

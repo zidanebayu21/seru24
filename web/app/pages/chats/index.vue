@@ -113,7 +113,8 @@ onMounted(load)
     </header>
 
     <form class="row search" @submit.prevent="search">
-      <input v-model="query" placeholder="Cari username persis, mis. zidane_21" maxlength="31" autocomplete="off">
+      <label for="search-username-input" class="sr-only">Cari username</label>
+      <input id="search-username-input" v-model="query" placeholder="Cari username persis, mis. zidane_21" maxlength="31" autocomplete="off">
       <button class="primary" type="submit" :disabled="busy">Cari</button>
     </form>
     <div v-if="found" class="found row">
