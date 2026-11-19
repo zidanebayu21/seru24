@@ -3,6 +3,7 @@ import { ActivityIndicator, AppState, StatusBar, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import type { Conversation } from '../../web/shared/chat-core';
 import { loadCachedAccount, restoreSession, setRealtimeActive, type RestoreStatus } from './lib/core';
+import { isStandby, loadStandby } from './lib/standby';
 import { flushOutbox } from './lib/outbox';
 import { loadNotifySetting, startNotifications, stopNotifications, updateNotificationPresence } from './lib/notify';
 import { AuthScreen } from './screens/AuthScreen';
@@ -51,8 +52,10 @@ const App = () => {
       .then(settle)
       .catch(() => setScreen({ name: 'auth' }));
 
+    loadStandby().catch(() => undefined);
     const sub = AppState.addEventListener('change', state => {
-      setRealtimeActive(state === 'active');
+      // mode standby: koneksi realtime tidak diputus di latar belakang
+      setRealtimeActive(state === 'active' || isStandby());
       if (state === 'active') flushOutbox().catch(() => undefined);
     });
     return () => {

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, AppState, FlatList, Pressable, RefreshControl, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import {
   CONVERSATION_PAGE_SIZE,
   appendConversations,
@@ -12,6 +12,8 @@ import {
 } from '../../../web/shared/chat-core';
 import { loadLocalConversations, saveLocalConversations } from '../lib/chatStorage';
 import { account, inbox, listConversations, rpc } from '../lib/core';
+import { getPreview, previewFromEvent, refreshPreviews } from '../lib/previews';
+import { isStandby, loadStandby, setStandby } from '../lib/standby';
 import { AccountMenu } from '../components/AccountMenu';
 import { Avatar } from '../components/Avatar';
 import { Button } from '../components/Button';
@@ -37,6 +39,22 @@ export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
   const [loadingMore, setLoadingMore] = useState(false);
   const conversationsRef = useRef<Conversation[]>([]);
   conversationsRef.current = conversations;
+  // cuplikan pesan terakhir (didekripsi di HP) dan mode standby (koneksi realtime tetap hidup di latar belakang)
+  const [previewTick, setPreviewTick] = useState(0);
+  const [standby, setStandbyState] = useState(isStandby());
+
+  useEffect(() => {
+    loadStandby().then(setStandbyState).catch(() => undefined);
+  }, []);
+
+  const toggleStandby = (on: boolean) => {
+    setStandbyState(on);
+    setStandby(on).catch(() => undefined);
+  };
+
+  useEffect(() => {
+    refreshPreviews(conversations, () => setPreviewTick(tick => tick + 1)).catch(() => undefined);
+  }, [conversations]);
 
   /** Daftar sebagian: percakapan lama di cache yang belum dimuat dipertahankan; daftar lengkap menggantikan cache. */
   const saveCache = async (myId: string | undefined, list: Conversation[], more: boolean) => {
@@ -75,7 +93,18 @@ export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
   useEffect(() => {
     void load().catch(() => {});
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const stop = inbox.onInbox(event => {
+    const stop = inbox.onInbox((event, payload) => {
+      if (event === 'message_new' || event === 'message_update') {
+        // cuplikan langsung diperbarui dari pesan yang masuk, tanpa menunggu daftar dimuat ulang
+        const target = conversationsRef.current.find(c => c.id === payload.conversation_id);
+        if (target) {
+          previewFromEvent(payload, target.peer_id)
+            .then(changed => {
+              if (changed) setPreviewTick(tick => tick + 1);
+            })
+            .catch(() => undefined);
+        }
+      }
       if (event !== 'message_new') return;
       clearTimeout(timer);
       timer = setTimeout(() => {
@@ -165,7 +194,16 @@ export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
           <Text style={styles.title}>Chat</Text>
           {syncing ? <ActivityIndicator size="small" color={colors.accent} accessibilityLabel="Menyinkronkan" /> : null}
         </View>
-        <AccountMenu onSignedOut={onSignedOut} />
+        <View style={[ui.row, { gap: 6 }]}>
+          <Text style={[ui.muted, { fontSize: 12 }]}>Standby</Text>
+          <Switch
+            value={standby}
+            onValueChange={toggleStandby}
+            trackColor={{ true: colors.accent, false: colors.border }}
+            accessibilityLabel="Standby: tetap tersambung di latar belakang agar pesan masuk terlihat tanpa membuka chat"
+          />
+          <AccountMenu onSignedOut={onSignedOut} />
+        </View>
       </View>
 
       <UpdateBanner />
@@ -202,6 +240,7 @@ export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
         data={conversations}
         keyExtractor={c => c.id}
         contentContainerStyle={{ paddingBottom: 24 }}
+        extraData={previewTick}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
         onEndReached={loadMore}
         onEndReachedThreshold={0.5}
@@ -221,12 +260,12 @@ export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
                 <Text style={[styles.time, item.unread > 0 ? styles.timeFresh : null]}>{formatTime(item.last_message_at)}</Text>
               </View>
               <View style={styles.line}>
-                <Text numberOfLines={1} style={[ui.muted, { flex: 1, fontSize: 14 }]}>
+                <Text numberOfLines={1} style={[ui.muted, { flex: 1, fontSize: 14 }, item.unread > 0 ? { color: colors.text, fontWeight: '600' } : null]}>
                   {isIncomingRequest(item, account.me?.id)
                     ? 'Permintaan chat baru'
                     : item.status === 'pending'
                       ? 'Menunggu diterima'
-                      : `@${item.peer_username}`}
+                      : (getPreview(item.id)?.text ?? `@${item.peer_username}`)}
                 </Text>
                 {item.unread > 0 ? <Text style={styles.badge}>{item.unread}</Text> : null}
               </View>
