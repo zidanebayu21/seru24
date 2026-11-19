@@ -91,6 +91,27 @@ export const formatTime = (iso: string | null) => {
     : date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })
 }
 
+/** Jam saja (mis. 14.05), untuk gelembung yang tanggalnya sudah ada di pemisah hari. */
+export const formatClock = (iso: string | null) =>
+  iso ? new Date(iso).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : ''
+
+/** Label pemisah hari: Hari ini, Kemarin, atau tanggal (dengan tahun bila bukan tahun ini). */
+export const formatDayLabel = (iso: string, now: Date = new Date()): string => {
+  const date = new Date(iso)
+  const days = Math.round((startOfDay(now) - startOfDay(date)) / 86_400_000)
+  if (days === 0) return 'Hari ini'
+  if (days === 1) return 'Kemarin'
+  return date.toLocaleDateString('id-ID', {
+    day: 'numeric',
+    month: 'long',
+    ...(date.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }),
+  })
+}
+
+const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+
+export const isSameDay = (a: string, b: string) => new Date(a).toDateString() === new Date(b).toDateString()
+
 export interface PagedBubble {
   key: string
   seq: number

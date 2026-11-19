@@ -437,7 +437,25 @@ const trustNewKey = async () => {
   keyStatus.value = await checkPeerKey(peerId())
 }
 
-const status = (b: Bubble) => bubbleStatus(b, peerReadSeq.value)
+const status = (b: Bubble) => {
+  const result = bubbleStatus(b, peerReadSeq.value)
+  // tanggal sudah ada di pemisah hari; gelembung cukup menampilkan jam
+  return b.pending || b.failed ? result : { ...result, text: formatClock(b.createdAt) }
+}
+
+const dayLabelAt = (index: number): string => {
+  const current = bubbles.value[index]
+  const previous = bubbles.value[index - 1]
+  if (!current || (previous && isSameDay(previous.createdAt, current.createdAt))) return ''
+  return formatDayLabel(current.createdAt)
+}
+
+/** Pesan beruntun dari pengirim yang sama di hari yang sama dirapatkan. */
+const isTight = (index: number): boolean => {
+  const current = bubbles.value[index]
+  const previous = bubbles.value[index - 1]
+  return Boolean(current && previous && current.mine === previous.mine && isSameDay(previous.createdAt, current.createdAt))
+}
 
 const startReply = (b: Bubble) => {
   replyingTo.value = b
@@ -505,7 +523,9 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
     <div ref="scroller" class="messages" @scroll.passive="onMessagesScroll">
       <p v-if="loadingOlder" class="older muted">Memuat pesan lama…</p>
       <button v-else-if="hasOlder" type="button" class="older" @click="loadOlder">Muat pesan lama</button>
-      <div v-for="b in bubbles" :key="b.key" class="bubble" :class="{ mine: b.mine, failed: b.failed }">
+      <template v-for="(b, i) in bubbles" :key="b.key">
+      <div v-if="dayLabelAt(i)" class="day"><span>{{ dayLabelAt(i) }}</span></div>
+      <div class="bubble" :class="{ mine: b.mine, failed: b.failed, tight: isTight(i) }">
         <div v-if="b.replyTo && !b.deleted" class="quote">
           <strong v-if="quoteOf(b).who">{{ quoteOf(b).who }}</strong>
           <span>{{ quoteOf(b).snippet }}</span>
@@ -520,7 +540,10 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
             <strong class="doc-name">{{ b.file.name }}</strong>
             <span class="muted">{{ formatFileSize(b.file.size) }}</span>
           </span>
-          <button type="button" class="doc-get" :disabled="Boolean(b.progress) || b.pending" @click="download(b)">Unduh</button>
+          <button type="button" class="doc-get" :disabled="Boolean(b.progress) || b.pending" @click="download(b)">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11" /><path d="M7 11l5 5 5-5" /><path d="M5 20h14" /></svg>
+            Unduh
+          </button>
         </div>
         <p v-else class="text">{{ b.text }}</p>
         <p v-if="b.progress" class="muted progress">{{ b.progress }}</p>
@@ -557,6 +580,7 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
           </button>
         </div>
       </div>
+      </template>
     </div>
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
@@ -619,12 +643,26 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
 .wrap { flex-wrap: wrap; }
 .messages {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 4px 2px;
+  padding: 8px 4px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text) 25%, transparent) transparent;
 }
+.day { align-self: center; margin: 10px 0 4px; }
+.day span {
+  display: inline-block;
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.bubble.tight { margin-top: -3px; }
 .older { align-self: center; font-size: 13px; }
 .bubble {
   max-width: min(78%, 34rem);
@@ -680,7 +718,23 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
 .attach, .send { display: grid; place-items: center; flex: none; width: 40px; min-height: 40px; height: 40px; padding: 0; border-radius: 50%; }
 .attach { border-color: transparent; background: transparent; color: var(--muted); }
 .attach:hover:not(:disabled) { border-color: transparent; background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
-.doc { gap: 10px; align-items: center; }
+.doc { gap: 12px; align-items: center; min-width: min(16rem, 62vw); }
+.doc-info { display: grid; min-width: 0; flex: 1; }
+.doc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
+.doc-get {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 4px 11px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+.doc-get:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 .doc-icon {
   display: grid;
   place-items: center;
@@ -693,7 +747,6 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
 }
 .doc-info { display: flex; flex-direction: column; min-width: 0; }
 .doc-name { overflow-wrap: anywhere; }
-.doc-get { padding: 4px 10px; font-size: 13px; }
 .progress { font-size: 12px; }
 .bar { height: 4px; border-radius: 2px; overflow: hidden; background: var(--border); }
 .bar-fill { height: 100%; background: var(--accent); transition: width 0.2s linear; }
