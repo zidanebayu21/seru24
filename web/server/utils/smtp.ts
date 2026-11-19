@@ -216,7 +216,7 @@ export const buildDailyStatsEmail = (report: DailyStatsReport, now = new Date())
   return { subject, text, html }
 }
 
-const extractAddress = (input: string) => {
+export const extractAddress = (input: string) => {
   const start = input.indexOf('<')
   const end = input.indexOf('>', start + 1)
   if (start !== -1 && end !== -1) {
@@ -225,10 +225,10 @@ const extractAddress = (input: string) => {
   return input.trim()
 }
 
-const chunkBase64 = (text: string) =>
+export const chunkBase64 = (text: string) =>
   Buffer.from(text, 'utf8').toString('base64').replace(/(.{76})/g, '$1\r\n')
 
-const buildMimePayload = (from: string, to: string[], subject: string, text: string, html: string) => {
+export const buildMimePayload = (from: string, to: string[], subject: string, text: string, html: string) => {
   const boundary = `seru24_${Date.now().toString(36)}_${randomBytes(6).toString('hex')}`
   const encodedSubject = `=?UTF-8?B?${Buffer.from(subject, 'utf8').toString('base64')}?=`
   return [

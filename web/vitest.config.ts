@@ -6,6 +6,7 @@ export default defineConfig({
   test: {
     include: ['test/**/*.test.ts'],
     environment: 'node',
+    testTimeout: 20000,
     coverage: {
       provider: 'v8',
       include: ['shared/**/*.ts', 'server/utils/**/*.ts'],

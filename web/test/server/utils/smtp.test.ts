@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { buildDailyStatsEmail, fileReportRows, formatStorage, parseSmtpConfig, type DailyStatsReport } from '../../../server/utils/smtp'
+import {
+  buildDailyStatsEmail,
+  buildMimePayload,
+  extractAddress,
+  fileReportRows,
+  formatStorage,
+  parseSmtpConfig,
+  type DailyStatsReport,
+} from '../../../server/utils/smtp'
 
 describe('smtp daily stats helper', () => {
   it('membaca konfigurasi SMTP dan menentukan mode secure dari port 465 vs 587', () => {
@@ -89,5 +97,17 @@ describe('smtp daily stats helper', () => {
       ['Dokumen yatim dibersihkan', '2 (gagal 1)'],
     ])
     expect(fileReportRows(null)[0]![0]).toBe('Dokumen')
+  })
+
+  it('mengekstrak alamat email dan menyusun payload MIME multipart', () => {
+    expect(extractAddress('bot@example.com')).toBe('bot@example.com')
+    expect(extractAddress('Seru24 Bot <bot@example.com>')).toBe('bot@example.com')
+
+    const mime = buildMimePayload('from@example.com', ['to@example.com'], 'Test Subject', 'Plain text', '<p>Html text</p>')
+    expect(mime).toContain('From: from@example.com')
+    expect(mime).toContain('To: to@example.com')
+    expect(mime).toContain('multipart/alternative')
+    expect(mime).toContain('Content-Type: text/plain')
+    expect(mime).toContain('Content-Type: text/html')
   })
 })
