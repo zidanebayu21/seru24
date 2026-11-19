@@ -14,6 +14,16 @@ import {
 import { Avatar } from '../components/Avatar';
 import { searchMessages } from '../../../web/shared/search-core';
 import {
+  SCHEDULE_ERRORS,
+  formatScheduleTime,
+  scheduledAsMessage,
+  scheduledFailureText,
+  toScheduleParams,
+  validateScheduleTime,
+  type ScheduleResult,
+  type ScheduledRow,
+} from '../../../web/shared/schedule-core';
+import {
   CHAT_MOBILE_PREFETCH_SCREENS,
   CHAT_PAGE_SIZE,
   SEND_ERRORS,
@@ -48,6 +58,7 @@ import { downloadFile, findSavedFile, openSavedFile, pickFiles, uploadFile, type
 import { notifyMessageSent } from '../lib/notify';
 import { onVoiceState, pauseVoice, playVoice, resumeVoice, stopVoice, type VoiceState } from '../lib/audio';
 import { Button } from '../components/Button';
+import { ScheduleSheet } from '../components/ScheduleSheet';
 import { MenuItem, PopupMenu } from '../components/PopupMenu';
 import { colors, themed, ui } from '../theme';
 
@@ -122,6 +133,29 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
   const [searchBusy, setSearchBusy] = useState(false);
   const [searchPool, setSearchPool] = useState<Bubble[]>([]);
   const [flashKey, setFlashKey] = useState('');
+  // kirim terjadwal: tekan lama tombol kirim; server menyimpan ciphertext dan melepasnya pada waktunya
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [scheduleBusy, setScheduleBusy] = useState(false);
+  const [scheduleError, setScheduleError] = useState('');
+  const [scheduled, setScheduled] = useState<Array<{ row: ScheduledRow; text: string | null }>>([]);
+  const scheduledCount = scheduled.length;
+  const loadScheduled = useCallback(async () => {
+    const myId = account.me?.id ?? '';
+    try {
+      const rows = await rpc<ScheduledRow[]>('seru24_list_scheduled', { p_conversation_id: initial.id });
+      setScheduled(
+        await Promise.all(
+          (rows ?? []).map(async row => ({
+            row,
+            text: await e2ee.decryptText(scheduledAsMessage(row, initial.id, myId) as ChatMessage, initial.peer_id),
+          })),
+        ),
+      );
+    } catch {
+      // offline atau fitur belum tersedia di server: daftar kosong
+      setScheduled([]);
+    }
+  }, [initial.id, initial.peer_id]);
   const searchHits = useMemo(() => (searchOpen ? searchMessages(searchPool, searchQuery) : []), [searchOpen, searchPool, searchQuery]);
   const [voice, setVoice] = useState<VoiceState | null>(null);
 
@@ -213,6 +247,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
 
         // offline: kunci publik lawan dari cache HP
         setKeyStatus(await e2ee.checkPeerKey(peerId).catch(() => ({ status: 'missing' as const })));
+        loadScheduled().catch(() => undefined);
 
         if (allMessagesRef.current.length > 0) {
           const initialSlice = sliceMessagesPage(allMessagesRef.current, null, CHAT_PAGE_SIZE);
@@ -295,6 +330,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         rpc<number>('seru24_peer_read_seq', { p_conversation_id: conversation.id })
           .then(seq => setPeerReadSeq(prev => Math.max(prev, Number(seq) || 0)))
           .catch(() => undefined);
+        loadScheduled().catch(() => undefined);
       } catch {
         // tetap tampil dari cache; dicoba lagi saat app aktif berikutnya
       } finally {
@@ -473,6 +509,71 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
       updateBubbles(list => list.map(b => (b.pending && b.text === text ? { ...b, pending: false, failed: e instanceof Error ? e.message : 'Pesan gagal dikirim' } : b)));
     }
   };
+
+  const openSchedule = () => {
+    if (!draft.trim() || cannotSend || scheduleBusy) return;
+    setScheduleError('');
+    setScheduleOpen(true);
+  };
+
+  const confirmSchedule = async (at: Date) => {
+    if (scheduleBusy) return;
+    const problem = validateScheduleTime(at, new Date());
+    if (problem) {
+      setScheduleError(SCHEDULE_ERRORS[problem] ?? '');
+      return;
+    }
+    const text = draft.trim();
+    const replyTo = replyingTo?.id ?? null;
+    setScheduleBusy(true);
+    setScheduleError('');
+    try {
+      const attempt = async (retry: boolean) =>
+        rpc<ScheduleResult>('seru24_schedule_message', toScheduleParams(await e2ee.encryptText(conversation.id, peerId, text, retry), at, replyTo));
+      let result = await attempt(false);
+      if (result.code === 'stale_key') {
+        setKeyStatus(await e2ee.checkPeerKey(peerId));
+        result = await attempt(true);
+      }
+      if (!result.ok) {
+        setScheduleError(SCHEDULE_ERRORS[result.code ?? ''] ?? 'Gagal menjadwalkan pesan');
+        return;
+      }
+      setDraft('');
+      setReplyingTo(null);
+      setScheduleOpen(false);
+      await loadScheduled();
+    } catch (e) {
+      setScheduleError(e instanceof Error && e.message ? e.message : 'Gagal menjadwalkan pesan');
+    } finally {
+      setScheduleBusy(false);
+    }
+  };
+
+  const cancelScheduled = (id: string) => {
+    Alert.alert('Batalkan pesan terjadwal?', 'Pesan ini tidak akan dikirim.', [
+      { text: 'Tidak', style: 'cancel' },
+      {
+        text: 'Batalkan',
+        style: 'destructive',
+        onPress: () => {
+          rpc('seru24_cancel_scheduled', { p_id: id })
+            .catch(() => undefined)
+            .then(() => loadScheduled())
+            .catch(() => undefined);
+        },
+      },
+    ]);
+  };
+
+  // pesan terjadwal yang sudah terkirim hilang dari daftar tanpa perlu membuka ulang chat
+  useEffect(() => {
+    if (scheduledCount === 0) return undefined;
+    const timer = setInterval(() => {
+      if (AppState.currentState === 'active') loadScheduled().catch(() => undefined);
+    }, 30000);
+    return () => clearInterval(timer);
+  }, [scheduledCount, loadScheduled]);
 
   const addLocalBubble = (text: string, replyTo: string | null = null) => {
     const localKey = `local-${randomId()}`;
@@ -943,6 +1044,27 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         )}
       />
 
+      {scheduled.length > 0 ? (
+        <View style={styles.scheduledList} accessibilityLabel="Pesan terjadwal">
+          {scheduled.map(({ row, text }) => (
+            <View key={row.id} style={styles.scheduledRow}>
+              <Text style={[styles.scheduledWhen, row.status === 'failed' ? { color: colors.danger } : null]}>
+                {row.status === 'failed' ? 'Gagal' : formatScheduleTime(row.send_at, new Date())}
+              </Text>
+              <Text style={[ui.muted, { flex: 1 }]} numberOfLines={1}>
+                {row.status === 'failed' ? scheduledFailureText(row) : (text ?? 'Pesan terjadwal')}
+              </Text>
+              <Pressable
+                onPress={() => cancelScheduled(row.id)}
+                accessibilityRole="button"
+                accessibilityLabel={row.status === 'failed' ? 'Hapus dari daftar' : 'Batalkan pesan terjadwal'}
+                hitSlop={8}>
+                <Text style={[ui.muted, { fontSize: 16 }]}>✕</Text>
+              </Pressable>
+            </View>
+          ))}
+        </View>
+      ) : null}
       {replyingTo ? (
         <View style={styles.replying}>
           <View style={[styles.quote, { flex: 1, marginBottom: 0 }]}>
@@ -977,14 +1099,27 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
           />
           <Pressable
             onPress={send}
+            onLongPress={openSchedule}
+            delayLongPress={450}
             disabled={!draft.trim() || cannotSend}
             accessibilityRole="button"
             accessibilityLabel="Kirim pesan"
+            accessibilityHint="Tekan lama untuk jadwalkan"
             style={[styles.roundButton, styles.sendButton, { opacity: !draft.trim() || cannotSend ? 0.4 : 1 }]}>
             <Text style={{ fontSize: 20, lineHeight: 22, color: colors.accentText, fontWeight: '700' }}>↑</Text>
           </Pressable>
         </View>
       </View>
+      <ScheduleSheet
+        open={scheduleOpen}
+        busy={scheduleBusy}
+        error={scheduleError}
+        onClose={() => setScheduleOpen(false)}
+        onPick={at => {
+          confirmSchedule(at).catch(() => undefined);
+        }}
+        onInvalid={setScheduleError}
+      />
     </KeyboardAvoidingView>
   );
 };
@@ -1019,6 +1154,9 @@ const styles = themed(() => ({
   theirs: { alignSelf: 'flex-start', backgroundColor: colors.surface, borderBottomLeftRadius: 5, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
   quote: { borderLeftWidth: 3, borderLeftColor: colors.accent, backgroundColor: `${colors.accent}22`, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, marginBottom: 4 },
   quoteWho: { color: colors.accent, fontWeight: '700', fontSize: 12 },
+  scheduledList: { gap: 4, paddingHorizontal: 14, paddingVertical: 6, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, backgroundColor: colors.surface },
+  scheduledRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  scheduledWhen: { color: colors.accent, fontWeight: '600', fontSize: 13 },
   replying: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingTop: 6 },
   ticks: { fontSize: 11, color: colors.muted, letterSpacing: -2 },
   ticksRead: { color: colors.accent, fontWeight: '700' },

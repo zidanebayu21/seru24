@@ -19,6 +19,20 @@ import {
 import { createConversationPresence, type PeerPresence } from '#shared/presence-core'
 import { searchMessages } from '#shared/search-core'
 import {
+  SCHEDULE_ERRORS,
+  formatScheduleTime,
+  fromLocalInputValue,
+  parseClockInput,
+  schedulePresets,
+  scheduledAsMessage,
+  scheduledFailureText,
+  toLocalInputValue,
+  toScheduleParams,
+  validateScheduleTime,
+  type ScheduleResult,
+  type ScheduledRow,
+} from '#shared/schedule-core'
+import {
   createTransferMeter,
   formatClockSeconds,
   formatFileSize,
@@ -306,6 +320,7 @@ const resync = async () => {
     const changed = changedMessages(allMessages.value, rows)
     for (const row of changed) await upsert(row)
     if (changed.some((row) => row.sender_id !== account.me?.id)) markRead()
+    void loadScheduled()
     rpc<number>('seru24_peer_read_seq', { p_conversation_id: conversationId })
       .then((seq) => { peerReadSeq.value = Math.max(peerReadSeq.value, Number(seq) || 0) })
       .catch(() => undefined)
@@ -388,6 +403,115 @@ const send = async () => {
     bubble.failed = e instanceof Error && e.message ? e.message : 'Pesan gagal dikirim'
   }
 }
+
+// ---- kirim terjadwal: tekan lama tombol kirim; server menyimpan ciphertext dan melepasnya pada waktunya ----
+const scheduleOpen = ref(false)
+const scheduleError = ref('')
+const scheduleBusy = ref(false)
+const scheduleCustom = ref('')
+const scheduleClock = ref('')
+const scheduledItems = ref<Array<{ row: ScheduledRow; text: string | null }>>([])
+const schedulePresetList = computed(() => (scheduleOpen.value ? schedulePresets(new Date()) : []))
+
+const loadScheduled = async () => {
+  const myId = account.me?.id ?? ''
+  try {
+    const rows = await rpc<ScheduledRow[]>('seru24_list_scheduled', { p_conversation_id: conversationId })
+    scheduledItems.value = await Promise.all(
+      (rows ?? []).map(async (row) => ({ row, text: await decryptText(scheduledAsMessage(row, conversationId, myId) as ChatMessage, peerId()) })),
+    )
+  } catch {
+    // offline atau fitur belum tersedia di server: daftar kosong
+    scheduledItems.value = []
+  }
+}
+
+const openSchedule = () => {
+  if (!draft.value.trim() || !conversation.value || keyStatus.value.status === 'missing' || scheduleBusy.value) return
+  scheduleError.value = ''
+  scheduleClock.value = ''
+  scheduleCustom.value = toLocalInputValue(schedulePresets(new Date())[0]!.at)
+  scheduleOpen.value = true
+}
+
+const confirmSchedule = async (at: Date | null) => {
+  if (scheduleBusy.value) return
+  const problem = at ? validateScheduleTime(at, new Date()) : 'too_soon'
+  if (!at || problem) {
+    scheduleError.value = SCHEDULE_ERRORS[problem ?? 'too_soon'] ?? ''
+    return
+  }
+  const text = draft.value.trim()
+  const replyTo = replyingTo.value?.id ?? null
+  scheduleBusy.value = true
+  scheduleError.value = ''
+  try {
+    const attempt = async (retry: boolean) =>
+      rpc<ScheduleResult>('seru24_schedule_message', toScheduleParams(await encryptText(conversationId, peerId(), text, retry), at, replyTo))
+    let result = await attempt(false)
+    if (result.code === 'stale_key') {
+      keyStatus.value = await checkPeerKey(peerId())
+      result = await attempt(true)
+    }
+    if (!result.ok) {
+      scheduleError.value = SCHEDULE_ERRORS[result.code ?? ''] ?? 'Gagal menjadwalkan pesan'
+      return
+    }
+    draft.value = ''
+    replyingTo.value = null
+    scheduleOpen.value = false
+    await loadScheduled()
+  } catch (e) {
+    scheduleError.value = e instanceof Error && e.message ? e.message : 'Gagal menjadwalkan pesan'
+  } finally {
+    scheduleBusy.value = false
+  }
+}
+
+const confirmScheduleClock = () => {
+  const at = parseClockInput(scheduleClock.value, new Date())
+  if (!at) scheduleError.value = 'Tulis jam seperti 20.30'
+  else void confirmSchedule(at)
+}
+
+const cancelScheduled = async (id: string) => {
+  if (!window.confirm('Batalkan pesan terjadwal ini?')) return
+  await rpc('seru24_cancel_scheduled', { p_id: id }).catch(() => undefined)
+  await loadScheduled()
+}
+
+// tekan lama tombol kirim (sentuh atau mouse) = buka jadwal; klik biasa tetap mengirim
+const LONG_PRESS_MS = 500
+let longPressTimer: ReturnType<typeof setTimeout> | null = null
+let longPressed = false
+const clearLongPress = () => {
+  if (longPressTimer) clearTimeout(longPressTimer)
+  longPressTimer = null
+}
+const startLongPress = () => {
+  clearLongPress()
+  longPressed = false
+  longPressTimer = setTimeout(() => {
+    longPressed = true
+    openSchedule()
+  }, LONG_PRESS_MS)
+}
+const onSendClick = (event: Event) => {
+  if (!longPressed) return
+  longPressed = false
+  event.preventDefault()
+}
+// pesan terjadwal yang sudah terkirim hilang dari daftar tanpa perlu membuka ulang chat
+let scheduledTimer: ReturnType<typeof setInterval> | null = null
+onMounted(() => {
+  scheduledTimer = setInterval(() => {
+    if (scheduledItems.value.length && document.visibilityState === 'visible') void loadScheduled()
+  }, 30_000)
+})
+onBeforeUnmount(() => {
+  clearLongPress()
+  if (scheduledTimer) clearInterval(scheduledTimer)
+})
 
 /** Dokumen dikirim satu per satu: enkripsi, unggah per potongan, lalu kirim pesan berisi kunci file (E2EE). */
 const sendFile = async (file: File, label?: string) => {
@@ -769,7 +893,7 @@ const subtitle = computed(() => {
   return peerPresence.value.online ? `${handle} · online` : `${handle} · terenkripsi end-to-end`
 })
 
-onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
+onMounted(() => load().then(() => loadScheduled()).catch(() => { error.value = 'Gagal memuat percakapan' }))
 </script>
 
 <template>
@@ -942,6 +1066,13 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
       </div>
       <button type="button" class="icon-del" aria-label="Batal membalas" title="Batal" @click="replyingTo = null">&times;</button>
     </div>
+    <ul v-if="scheduledItems.length" class="scheduled" aria-label="Pesan terjadwal">
+      <li v-for="item in scheduledItems" :key="item.row.id" :class="{ failed: item.row.status === 'failed' }">
+        <span class="when">{{ item.row.status === 'failed' ? 'Gagal' : formatScheduleTime(item.row.send_at, new Date()) }}</span>
+        <span class="what">{{ item.row.status === 'failed' ? scheduledFailureText(item.row) : (item.text ?? 'Pesan terjadwal') }}</span>
+        <button type="button" class="icon-del" :aria-label="item.row.status === 'failed' ? 'Hapus dari daftar' : 'Batalkan pesan terjadwal'" title="Batalkan" @click="cancelScheduled(item.row.id)">&times;</button>
+      </li>
+    </ul>
     <div v-if="recording" class="composer row recording" role="group" aria-label="Merekam pesan suara">
       <button type="button" class="attach" aria-label="Batalkan rekaman" title="Batalkan" @click="cancelRecording">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16" /><path d="M9 7V4h6v3" /><path d="M6 7l1 13h10l1-13" /></svg>
@@ -975,6 +1106,7 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
         placeholder="Tulis pesan"
         :disabled="keyStatus.status === 'missing' || conversation.peer_blocked"
         @keydown.enter.exact.prevent="send"
+        @keydown.alt.enter.prevent="openSchedule"
         @input="presence?.notifyTyping()"
       />
       <button
@@ -988,10 +1120,47 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
       >
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0" /><path d="M12 18v3" /></svg>
       </button>
-      <button v-else class="primary send" type="submit" aria-label="Kirim pesan" :disabled="!draft.trim() || keyStatus.status === 'missing'">
+      <button
+        v-else
+        class="primary send"
+        type="submit"
+        aria-label="Kirim pesan"
+        title="Klik untuk kirim, tekan lama untuk jadwalkan"
+        :disabled="!draft.trim() || keyStatus.status === 'missing'"
+        @pointerdown="startLongPress"
+        @pointerup="clearLongPress"
+        @pointerleave="clearLongPress"
+        @pointercancel="clearLongPress"
+        @click="onSendClick"
+        @contextmenu.prevent="openSchedule"
+      >
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14" /><path d="M13 6l6 6-6 6" /></svg>
       </button>
     </form>
+    <div v-if="scheduleOpen" class="schedule-backdrop" @click.self="scheduleOpen = false" @keydown.esc="scheduleOpen = false">
+      <div class="schedule-card" role="dialog" aria-modal="true" aria-labelledby="schedule-title">
+        <h2 id="schedule-title">Jadwalkan pesan</h2>
+        <p class="muted">Pesan tetap terenkripsi; server hanya menyimpannya sampai waktu kirim.</p>
+        <div class="schedule-presets">
+          <button v-for="preset in schedulePresetList" :key="preset.label" type="button" :disabled="scheduleBusy" @click="confirmSchedule(preset.at)">
+            <strong>{{ preset.label }}</strong>
+            <span class="muted">{{ formatScheduleTime(preset.at.toISOString(), new Date()) }}</span>
+          </button>
+        </div>
+        <label for="schedule-custom">Pilih tanggal dan jam</label>
+        <div class="row">
+          <input id="schedule-custom" v-model="scheduleCustom" type="datetime-local" class="grow">
+          <button type="button" class="primary" :disabled="scheduleBusy" @click="confirmSchedule(fromLocalInputValue(scheduleCustom))">Jadwalkan</button>
+        </div>
+        <label for="schedule-clock">Atau ketik jam saja (mis. 20.30)</label>
+        <div class="row">
+          <input id="schedule-clock" v-model="scheduleClock" inputmode="numeric" placeholder="20.30" class="grow" @keydown.enter.prevent="confirmScheduleClock">
+          <button type="button" :disabled="scheduleBusy" @click="confirmScheduleClock">Atur</button>
+        </div>
+        <p v-if="scheduleError" class="error" role="alert">{{ scheduleError }}</p>
+        <button type="button" class="ghost" @click="scheduleOpen = false">Batal</button>
+      </div>
+    </div>
   </main>
   <main v-else-if="!error" class="chat" aria-busy="true" aria-label="Memuat percakapan">
     <header class="bar row">
@@ -1133,6 +1302,18 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
 .voice-track { flex: 1; height: 4px; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, var(--text) 15%, transparent); }
 .voice-fill { height: 100%; background: var(--accent); }
 .voice-time { flex: none; min-width: 2.6em; text-align: right; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.scheduled { list-style: none; margin: 0; padding: 6px 14px; display: grid; gap: 4px; border-top: 1px solid var(--border); background: var(--surface); font-size: 13px; }
+.scheduled li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.scheduled .when { flex: none; color: var(--accent); font-weight: 600; }
+.scheduled .what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.scheduled .failed .when { color: var(--danger, #dc2626); }
+.schedule-backdrop { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, var(--bg) 70%, transparent); backdrop-filter: blur(3px); }
+.schedule-card { width: min(420px, 100%); display: grid; gap: 10px; padding: 20px; border: 1px solid var(--border); border-radius: 18px; background: var(--surface); box-shadow: 0 18px 50px rgba(0, 0, 0, 0.25); }
+.schedule-card h2 { margin: 0; font-size: 18px; }
+.schedule-card p { margin: 0; font-size: 13px; }
+.schedule-presets { display: grid; gap: 6px; }
+.schedule-presets button { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; text-align: left; }
+.schedule-card .grow { flex: 1; min-width: 0; }
 .drop {
   position: fixed;
   inset: 0;
