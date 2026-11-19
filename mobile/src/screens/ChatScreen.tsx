@@ -102,6 +102,7 @@ type SendParams = Awaited<ReturnType<typeof e2ee.encryptText>> & { p_attachment_
 const SAVED_NOTE = 'Tersimpan di Download/seru24';
 const QUEUED_NOTE = 'Menunggu sinyal, terkirim otomatis saat online';
 const DIRECT_NOTE = 'Dikirim langsung, tersimpan di server saat online';
+const RESEND_MS = 5000;
 const DIRECT_ACK_NOTE = 'Diterima langsung, tersimpan di server saat online';
 /** Pesan antrean dalam bentuk ChatMessage agar bisa didekripsi dan ditampilkan seperti pesan lain. */
 const queuedAsMessage = (item: QueuedMessage, myId: string | null): ChatMessage => ({
@@ -152,6 +153,8 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
   // Siaran Dekat: chat langsung antar HP tanpa internet; sesama kontak tersambung otomatis saat siaran menyala
   const [radarOn, setRadarOn] = useState(isRadarOn());
   const [peerNear, setPeerNear] = useState(false);
+  // pesan antrean yang sudah dikonfirmasi HP lawan (ack); sisanya dikirim ulang selama tersambung
+  const ackedRef = useRef(new Set<string>());
   const [pins, setPins] = useState<string[]>([]);
   const [pinsReady, setPinsReady] = useState(false);
   const [pinsOpen, setPinsOpen] = useState(false);
@@ -264,7 +267,10 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
       if (known) return;
       toBubble(message).then(bubble => updateBubbles(list => mergePagedBubbles([bubble], list))).catch(() => undefined);
     });
-    const offAck = onRadarAck(clientMsgId => updateBubble(clientMsgId, { progress: DIRECT_ACK_NOTE }));
+    const offAck = onRadarAck(clientMsgId => {
+      ackedRef.current.add(clientMsgId);
+      updateBubble(clientMsgId, { progress: DIRECT_ACK_NOTE });
+    });
     return () => {
       offMessage();
       offAck();
@@ -272,12 +278,21 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversation.id, toBubble]);
 
-  // Baru tersambung: kirim pesan yang sudah mengantre sebelum tersambung (penerima membuang duplikat dan membalas ack)
+  // Selama tersambung langsung: kirim pesan antrean yang belum di-ack, dan ulangi sampai dikonfirmasi (sambungan Bluetooth bisa
+  // putus-nyambung sebentar; penerima membuang duplikat dan selalu membalas ack)
   useEffect(() => {
     if (!peerNear) return;
-    void queuedFor(conversation.id).then(items => {
-      for (const item of items) sendContactMessage(peerId, item.params, item.queuedAt).catch(() => undefined);
-    });
+    const resend = () => {
+      void queuedFor(conversation.id).then(items => {
+        for (const item of items) {
+          if (ackedRef.current.has(item.params.p_client_msg_id)) continue;
+          sendContactMessage(peerId, item.params, item.queuedAt).catch(() => undefined);
+        }
+      });
+    };
+    resend();
+    const timer = setInterval(resend, RESEND_MS);
+    return () => clearInterval(timer);
   }, [peerNear, conversation.id, peerId]);
 
   const togglePin = (item: Bubble) => {

@@ -13,6 +13,7 @@ import com.google.android.gms.nearby.Nearby;
 import com.google.android.gms.nearby.connection.AdvertisingOptions;
 import com.google.android.gms.nearby.connection.ConnectionInfo;
 import com.google.android.gms.nearby.connection.ConnectionLifecycleCallback;
+import com.google.android.gms.nearby.connection.ConnectionOptions;
 import com.google.android.gms.nearby.connection.ConnectionResolution;
 import com.google.android.gms.nearby.connection.ConnectionsClient;
 import com.google.android.gms.nearby.connection.DiscoveredEndpointInfo;
@@ -32,6 +33,10 @@ import java.util.Set;
  * Bluetooth atau Wi-Fi Direct untuk data). Modul ini hanya mengangkut byte dan melaporkan kejadian ke JS; siapa yang
  * dihubungi, diterima, atau ditolak diputuskan JS. Nama yang diumumkan dibuat JS (alias acak, bukan username). Payload
  * hanya BYTES (maks 32 KB), tanpa file. Jumlah koneksi dibatasi agar perangkat asing tidak bisa membanjiri.
+ *
+ * Hanya teks pendek yang dikirim, jadi cukup Bluetooth/BLE: mode hemat daya (lowPower) mematikan peningkatan otomatis ke
+ * Wi-Fi Direct/hotspot, dan disruptiveUpgrade=false mencegah Wi-Fi HP yang sedang dipakai diputus. Peningkatan ke
+ * Wi-Fi itulah yang membuat sambungan sempat putus sehingga pesan gagal terkirim langsung.
  */
 public class NearbyModule extends ReactContextBaseJavaModule {
     private static final String EVENT = "seru24NearbyEvent";
@@ -135,8 +140,8 @@ public class NearbyModule extends ReactContextBaseJavaModule {
         localName = name;
         active = true;
         try {
-            client().startAdvertising(localName, SERVICE_ID, lifecycle, new AdvertisingOptions.Builder().setStrategy(STRATEGY).build())
-                .addOnSuccessListener(unused -> client().startDiscovery(SERVICE_ID, discovery, new DiscoveryOptions.Builder().setStrategy(STRATEGY).build())
+            client().startAdvertising(localName, SERVICE_ID, lifecycle, new AdvertisingOptions.Builder().setStrategy(STRATEGY).setLowPower(true).setDisruptiveUpgrade(false).build())
+                .addOnSuccessListener(unused -> client().startDiscovery(SERVICE_ID, discovery, new DiscoveryOptions.Builder().setStrategy(STRATEGY).setLowPower(true).build())
                     .addOnSuccessListener(u -> {
                         emit("state", "", "on");
                         promise.resolve(null);
@@ -161,7 +166,7 @@ public class NearbyModule extends ReactContextBaseJavaModule {
             return;
         }
         pending.add(endpointId);
-        client().requestConnection(localName, endpointId, lifecycle)
+        client().requestConnection(localName, endpointId, lifecycle, new ConnectionOptions.Builder().setLowPower(true).setDisruptiveUpgrade(false).build())
             .addOnSuccessListener(unused -> promise.resolve(null))
             .addOnFailureListener(e -> {
                 pending.remove(endpointId);
