@@ -541,6 +541,25 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     if (text) presenceRef.current?.notifyTyping();
   };
 
+  /** Hapus pesan bersifat permanen untuk kedua pihak (dokumen ikut dihapus dari server): minta konfirmasi dulu. */
+  const confirmRemove = (item: Bubble) => {
+    Alert.alert(
+      item.file ? 'Hapus dokumen?' : 'Hapus pesan?',
+      `${item.file ? 'File juga dihapus permanen dari server. ' : ''}Berlaku untuk kedua pihak dan tidak bisa dibatalkan.`,
+      [
+        { text: 'Batal', style: 'cancel' },
+        { text: 'Hapus', style: 'destructive', onPress: () => void removeMessage(item) },
+      ],
+    );
+  };
+
+  const confirmClearChat = async () => {
+    Alert.alert('Hapus riwayat chat?', 'Hanya di HP ini. Pesan di server dan di perangkat lain tidak ikut terhapus.', [
+      { text: 'Batal', style: 'cancel' },
+      { text: 'Hapus', style: 'destructive', onPress: () => void clearChatLocally() },
+    ]);
+  };
+
   /** Tekan lama pada gelembung: balas, atau hapus (pesan sendiri). */
   const showActions = (item: Bubble) => {
     if (!item.id || item.pending || item.deleted) return;
@@ -575,7 +594,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         </Pressable>
       </View>
       <PopupMenu open={menuOpen} onClose={() => setMenuOpen(false)}>
-        <MenuItem label="Hapus riwayat chat di HP ini" onPress={() => closeMenuThen(clearChatLocally)} />
+        <MenuItem label="Hapus riwayat chat di HP ini" onPress={() => closeMenuThen(confirmClearChat)} />
         <MenuItem
           label={conversation.peer_blocked ? 'Buka blokir' : 'Blokir'}
           danger={!conversation.peer_blocked}
@@ -599,7 +618,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
             onPress={() => {
               const target = actionsFor;
               setActionsFor(null);
-              if (target) removeMessage(target);
+              if (target) confirmRemove(target);
             }}
           />
         ) : null}

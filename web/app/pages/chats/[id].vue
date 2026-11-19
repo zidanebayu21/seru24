@@ -370,16 +370,79 @@ const sendFile = async (file: File, label?: string) => {
   if (bubble.failed && uploaded) deleteRemoteFile(uploaded.id).catch(() => undefined)
 }
 
-const onFilesPicked = async (event: Event) => {
-  const input = event.target as HTMLInputElement
-  const files = [...(input.files ?? [])]
-  input.value = ''
+const sendPickedFiles = async (files: File[]) => {
   error.value = ''
   // file di atas batas tidak dibuat sebagai pesan (tidak bisa dihapus dari daftar): cukup popup
   const { allowed, message } = splitByFileLimit(files)
   if (message) window.alert(message)
   for (const file of allowed) await sendFile(file)
 }
+
+const onFilesPicked = async (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const files = [...(input.files ?? [])]
+  input.value = ''
+  await sendPickedFiles(files)
+}
+
+// ---- seret dan lepas file ke halaman chat ----
+
+const dragging = ref(false)
+let dragDepth = 0
+
+const canSendFiles = () => !recording.value && keyStatus.value.status !== 'missing' && !conversation.value?.peer_blocked
+
+const hasFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types ?? []).includes('Files')
+
+/** File saja; folder yang diseret dilewati karena tidak bisa dikirim sebagai dokumen. */
+const droppedFiles = (event: DragEvent): File[] =>
+  Array.from(event.dataTransfer?.items ?? [])
+    .filter((item) => item.kind === 'file' && !item.webkitGetAsEntry?.()?.isDirectory)
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => file !== null)
+
+const onWindowDragEnter = (event: DragEvent) => {
+  if (!hasFiles(event)) return
+  dragDepth += 1
+  dragging.value = canSendFiles()
+}
+
+const onWindowDragLeave = (event: DragEvent) => {
+  if (!hasFiles(event)) return
+  dragDepth = Math.max(0, dragDepth - 1)
+  if (dragDepth === 0) dragging.value = false
+}
+
+// preventDefault di seluruh jendela: file yang terlepas di luar area chat tidak membuka tab baru dan meninggalkan chat
+const onWindowDragOver = (event: DragEvent) => {
+  if (hasFiles(event)) event.preventDefault()
+}
+
+const onWindowDrop = async (event: DragEvent) => {
+  if (!hasFiles(event)) return
+  event.preventDefault()
+  dragDepth = 0
+  dragging.value = false
+  if (!canSendFiles()) {
+    error.value = 'File tidak bisa dikirim ke percakapan ini sekarang'
+    return
+  }
+  await sendPickedFiles(droppedFiles(event))
+}
+
+onMounted(() => {
+  window.addEventListener('dragenter', onWindowDragEnter)
+  window.addEventListener('dragleave', onWindowDragLeave)
+  window.addEventListener('dragover', onWindowDragOver)
+  window.addEventListener('drop', onWindowDrop)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('dragenter', onWindowDragEnter)
+  window.removeEventListener('dragleave', onWindowDragLeave)
+  window.removeEventListener('dragover', onWindowDragOver)
+  window.removeEventListener('drop', onWindowDrop)
+})
 
 const download = async (bubble: Bubble) => {
   if (!bubble.file || bubble.progress) return
@@ -410,6 +473,16 @@ const removeMessage = async (bubble: Bubble) => {
     const cached = allMessages.value.find((m) => m.client_msg_id === bubble.key)
     if (cached) await upsert(markMessageDeleted(cached))
   }
+}
+
+/** Hapus pesan bersifat permanen untuk kedua pihak (dokumen ikut dihapus dari server): minta konfirmasi dulu. */
+const confirmRemove = (bubble: Bubble) => {
+  const what = bubble.file ? 'dokumen ini? File juga dihapus permanen dari server' : 'pesan ini?'
+  if (window.confirm(`Hapus ${what}\nBerlaku untuk kedua pihak dan tidak bisa dibatalkan.`)) void removeMessage(bubble)
+}
+
+const confirmClearChat = async () => {
+  if (window.confirm('Hapus riwayat chat di browser ini?\nPesan di server dan di perangkat lain tidak ikut terhapus.')) await clearChatLocally()
 }
 
 const clearChatLocally = async () => {
@@ -602,6 +675,13 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
 
 <template>
   <main v-if="conversation" class="chat">
+    <div v-if="dragging" class="drop" aria-hidden="true">
+      <div class="drop-card">
+        <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4" /><path d="M7 9l5-5 5 5" /><path d="M5 20h14" /></svg>
+        <strong>Lepaskan untuk mengirim</strong>
+        <span class="muted">ke {{ peerLabel(conversation) }} · maks 50 MB per file</span>
+      </div>
+    </div>
     <header class="bar row">
       <NuxtLink to="/chats" class="back" aria-label="Kembali">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7" /></svg>
@@ -630,7 +710,7 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
         <button type="button" :disabled="!reportReason || reportDone" @click="report">
           {{ reportDone ? 'Terkirim' : 'Laporkan' }}
         </button>
-        <button type="button" class="danger" @click="clearChatLocally">
+        <button type="button" class="danger" @click="confirmClearChat">
           Hapus riwayat chat di browser ini
         </button>
       </div>
@@ -717,7 +797,7 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
             class="icon-del"
             aria-label="Hapus pesan"
             title="Hapus pesan"
-            @click="removeMessage(b)"
+            @click="confirmRemove(b)"
           >
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16" /><path d="M9 7V4h6v3" /><path d="M6 7l1 13h10l1-13" /></svg>
           </button>
@@ -910,6 +990,27 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
 .voice-track { flex: 1; height: 4px; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, var(--text) 15%, transparent); }
 .voice-fill { height: 100%; background: var(--accent); }
 .voice-time { flex: none; min-width: 2.6em; text-align: right; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.drop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  backdrop-filter: blur(3px);
+  pointer-events: none;
+}
+.drop-card {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 34px 52px;
+  border: 2px dashed var(--accent);
+  border-radius: 22px;
+  background: var(--surface);
+  color: var(--accent);
+}
+.drop-card strong { color: var(--text); font-size: 17px; }
 .sk { display: block; background: linear-gradient(90deg, color-mix(in srgb, var(--text) 7%, transparent) 25%, color-mix(in srgb, var(--text) 13%, transparent) 50%, color-mix(in srgb, var(--text) 7%, transparent) 75%); background-size: 200% 100%; animation: sk-shimmer 1.4s ease-in-out infinite; }
 .sk-circle { width: 40px; height: 40px; border-radius: 50%; }
 .sk-line { width: 9rem; height: 14px; border-radius: 7px; }
