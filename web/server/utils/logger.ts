@@ -67,6 +67,8 @@ export interface LoggedHandlerOptions {
   /** event_code untuk permintaan yang ditolak (4xx); false = tidak dicatat. */
   rejectedEvent?: string | false
   channel?: LogChannel
+  /** false = batas laju diperiksa pemanggil sendiri (handler terenkripsi: identitas ada di dalam body). */
+  rateLimited?: boolean
 }
 
 /**
@@ -80,10 +82,12 @@ export const defineLoggedHandler = <T>(
 ) =>
   defineEventHandler(async (event) => {
     try {
+      if (options.rateLimited !== false) await enforceRateLimit(event, bearerToken(event))
       return await handler(event)
     } catch (error) {
       if (isError(error) && error.statusCode < 500) {
-        if (options.rejectedEvent !== false) {
+        // 429 tidak dicatat: banjir permintaan tidak boleh berubah menjadi banjir tulisan log ke database
+        if (options.rejectedEvent !== false && error.statusCode !== 429) {
           await writeLog(event, {
             level: 'warning',
             channel: options.channel ?? 'server',

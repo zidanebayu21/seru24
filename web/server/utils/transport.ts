@@ -92,5 +92,6 @@ export const defineSecureHandler = <T>(
   defineLoggedHandler(async (event) => {
     assertSameOrigin(event)
     const payload = await readSecureBody(event)
+    await enforceRateLimit(event, payload.access_token)
     return secureResponse(event, await handler(event, payload))
-  }, options)
+  }, { ...options, rateLimited: false })

@@ -62,15 +62,13 @@
   routeRules: {
     // Semua halaman dirender di browser: kunci privat dan sesi tidak pernah ada di server.
     '/**': { ssr: false },
-    // Batas percobaan login/daftar per IP (OWASP ASVS V2.2.1). Penyimpanan di memori per instance.
-    '/api/auth/**': { security: { rateLimiter: { tokensPerInterval: 10, interval: 60_000 } } },
-    '/api/push/**': { security: { rateLimiter: { tokensPerInterval: 60, interval: 60_000 } } },
-    // Dokumen dikirim per potongan 3 MiB (FILE_CHUNK_BYTES): body boleh sedikit di atas batas bawaan 2 MB,
-    // dan satu file 50 MB = 17 permintaan sehingga batas laju lebih longgar dari bawaan (OWASP ASVS V12.1.1, V11.1.4).
+    // Batas laju (login 1000/menit per pengguna+IP, belum login 50/menit per IP, /api/auth/* tanpa login 10/menit)
+    // ada di server/utils/rate-limit.ts.
+    // Dokumen dikirim per potongan 3 MiB (FILE_CHUNK_BYTES): body boleh sedikit di atas batas bawaan 2 MB.
+    // (OWASP ASVS V12.1.1, V11.1.4)
     '/api/files/**': {
       security: {
         requestSizeLimiter: { maxRequestSizeInBytes: 3_300_000, maxUploadFileRequestInBytes: 3_300_000 },
-        rateLimiter: { tokensPerInterval: 300, interval: 60_000 },
       },
     },
   },
@@ -78,6 +76,8 @@
   // Header keamanan (OWASP ASVS V14.4, V3.4)
   security: {
     nonce: true,
+    // limiter bawaan nuxt-security (150 per 5 menit per IP) dimatikan; diganti server/utils/rate-limit.ts
+    rateLimiter: false,
     // Isi pesan selalu dirender sebagai teks (tanpa v-html); validator ini menolak password yang mengandung "<".
     xssValidator: false,
     headers: {
