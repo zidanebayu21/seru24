@@ -1,12 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, BackHandler, FlatList, KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, BackHandler, FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { MAX_TEXT_LENGTH, randomId } from '../../../web/shared/crypto';
 import { createTransferMeter, formatFileSize, safeFileName, splitByFileLimit, type FileMessageBody } from '../../../web/shared/file-core';
+import { Avatar } from '../components/Avatar';
 import {
   CHAT_MOBILE_PREFETCH_SCREENS,
   CHAT_PAGE_SIZE,
   SEND_ERRORS,
   bubbleStatus,
+  formatClock,
+  formatDayLabel,
+  isSameDay,
   isIncomingRequest,
   markMessageDeleted,
   mergeCachedMessages,
@@ -97,6 +101,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [actionsFor, setActionsFor] = useState<Bubble | null>(null);
   // aplikasi baru dibuka: kunci chat masih dipulihkan di belakang
   const [preparing, setPreparing] = useState(account.status !== 'ready');
   const listRef = useRef<FlatList<Bubble>>(null);
@@ -536,6 +541,12 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     if (text) presenceRef.current?.notifyTyping();
   };
 
+  /** Tekan lama pada gelembung: balas, atau hapus (pesan sendiri). */
+  const showActions = (item: Bubble) => {
+    if (!item.id || item.pending || item.deleted) return;
+    setActionsFor(item);
+  };
+
   const subtitle = peerPresence.typing
     ? 'sedang mengetik…'
     : `@${conversation.peer_username} · ${peerPresence.online ? 'online' : 'terenkripsi end-to-end'}`;
@@ -546,10 +557,11 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
   return (
     <KeyboardAvoidingView style={ui.screen} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <View style={styles.header}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Kembali" onPress={onBack} style={{ padding: 8 }}>
-          <Text style={{ fontSize: 20, color: colors.accent }}>←</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel="Kembali" onPress={onBack} hitSlop={8} style={{ paddingHorizontal: 8 }}>
+          <Text style={{ fontSize: 34, lineHeight: 36, color: colors.text }}>‹</Text>
         </Pressable>
-        <View style={{ flex: 1 }}>
+        <Avatar name={peerLabel(conversation)} seed={conversation.peer_username} size={40} />
+        <View style={{ flex: 1, marginLeft: 8 }}>
           <Text numberOfLines={1} style={{ fontWeight: '700', color: colors.text }}>{peerLabel(conversation)}</Text>
           <Text style={[ui.muted, peerPresence.typing ? { color: colors.accent, fontStyle: 'italic' } : null]}>{subtitle}</Text>
         </View>
@@ -569,6 +581,28 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
           danger={!conversation.peer_blocked}
           onPress={() => closeMenuThen(toggleBlock)}
         />
+      </PopupMenu>
+
+      <PopupMenu open={actionsFor !== null} onClose={() => setActionsFor(null)}>
+        <MenuItem
+          label="Balas"
+          onPress={() => {
+            const target = actionsFor;
+            setActionsFor(null);
+            if (target) setReplyingTo(target);
+          }}
+        />
+        {actionsFor?.mine ? (
+          <MenuItem
+            label="Hapus pesan"
+            danger
+            onPress={() => {
+              const target = actionsFor;
+              setActionsFor(null);
+              if (target) removeMessage(target);
+            }}
+          />
+        ) : null}
       </PopupMenu>
 
       <View style={{ paddingHorizontal: 16, gap: 8 }}>
@@ -609,8 +643,25 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
             </View>
           ) : null
         }
-        renderItem={({ item }) => (
-          <View style={[styles.bubble, item.mine ? styles.mine : styles.theirs, item.failed ? { borderColor: colors.danger } : null]}>
+        renderItem={({ item, index }) => (
+          <View>
+          {!reversedBubbles[index + 1] || !isSameDay(reversedBubbles[index + 1]!.createdAt, item.createdAt) ? (
+            <View style={styles.dayWrap}>
+              <Text style={styles.dayChip}>{formatDayLabel(item.createdAt)}</Text>
+            </View>
+          ) : null}
+          <Pressable
+            onLongPress={() => showActions(item)}
+            delayLongPress={300}
+            accessibilityHint="Tekan lama untuk membalas atau menghapus"
+            style={[
+              styles.bubble,
+              item.mine ? styles.mine : styles.theirs,
+              item.failed ? { borderColor: colors.danger, borderWidth: 1.5 } : null,
+              reversedBubbles[index + 1] && reversedBubbles[index + 1]!.mine === item.mine && isSameDay(reversedBubbles[index + 1]!.createdAt, item.createdAt)
+                ? { marginTop: -3 }
+                : null,
+            ]}>
             {item.replyTo && !item.deleted ? (
               <View style={styles.quote}>
                 {quoteOf(item).who ? <Text style={styles.quoteWho}>{quoteOf(item).who}</Text> : null}
@@ -623,9 +674,11 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
               <Text style={ui.muted}>Pesan tidak dapat dibuka</Text>
             ) : item.file ? (
               <View style={[ui.row, { gap: 10 }]}>
-                <Text style={{ fontSize: 22 }}>📎</Text>
+                <View style={styles.docTile}>
+                  <Text style={styles.docExt}>{(item.file.name.split('.').pop() ?? 'FILE').slice(0, 4).toUpperCase()}</Text>
+                </View>
                 <View style={{ flexShrink: 1 }}>
-                  <Text style={{ color: colors.text, fontWeight: '700' }}>{item.file.name}</Text>
+                  <Text numberOfLines={1} style={{ color: colors.text, fontWeight: '600' }}>{item.file.name}</Text>
                   <Text style={[ui.muted, { fontSize: 12 }]}>{formatFileSize(item.file.size)}</Text>
                 </View>
                 {!item.pending ? (
@@ -649,7 +702,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
               </View>
             ) : null}
             <View style={[ui.row, { justifyContent: 'flex-end', gap: 10 }]}>
-              <Text style={[ui.muted, { fontSize: 11 }]}>{bubbleStatus(item, peerReadSeq).text}</Text>
+              <Text style={[ui.muted, { fontSize: 11 }]}>{item.pending || item.failed ? bubbleStatus(item, peerReadSeq).text : formatClock(item.createdAt)}</Text>
               {bubbleStatus(item, peerReadSeq).ticks ? (
                 <Text
                   accessibilityLabel={bubbleStatus(item, peerReadSeq).read ? 'Dibaca' : 'Terkirim'}
@@ -657,21 +710,8 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
                   {bubbleStatus(item, peerReadSeq).ticks}
                 </Text>
               ) : null}
-              {item.id && !item.pending && !item.deleted ? (
-                <Pressable onPress={() => setReplyingTo(item)} accessibilityRole="button" accessibilityLabel="Balas pesan" hitSlop={8}>
-                  <Text style={[ui.muted, { fontSize: 14, lineHeight: 14 }]}>↩</Text>
-                </Pressable>
-              ) : null}
-              {item.mine && item.id && !item.deleted ? (
-                <Pressable
-                  onPress={() => removeMessage(item)}
-                  accessibilityRole="button"
-                  accessibilityLabel="Hapus pesan"
-                  hitSlop={8}>
-                  <Text style={[ui.muted, { fontSize: 14, lineHeight: 14 }]}>✕</Text>
-                </Pressable>
-              ) : null}
             </View>
+          </Pressable>
           </View>
         )}
       />
@@ -688,26 +728,35 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         </View>
       ) : null}
       <View style={styles.composer}>
-        <Pressable
-          onPress={attachFiles}
-          disabled={cannotSend}
-          accessibilityRole="button"
-          accessibilityLabel="Kirim dokumen (maks 50 MB per file)"
-          hitSlop={6}
-          style={{ paddingHorizontal: 6, opacity: cannotSend ? 0.4 : 1 }}>
-          <Text style={{ fontSize: 22 }}>📎</Text>
-        </Pressable>
-        <TextInput
-          style={[ui.input, { flex: 1, maxHeight: 120 }]}
-          value={draft}
-          onChangeText={onDraftChange}
-          placeholder="Tulis pesan"
-          placeholderTextColor={colors.muted}
-          multiline
-          editable={!cannotSend}
-          maxLength={MAX_TEXT_LENGTH}
-        />
-        <Button label="Kirim" onPress={send} disabled={!draft.trim() || cannotSend} />
+        <View style={styles.composerPill}>
+          <Pressable
+            onPress={attachFiles}
+            disabled={cannotSend}
+            accessibilityRole="button"
+            accessibilityLabel="Kirim dokumen (maks 50 MB per file)"
+            hitSlop={6}
+            style={[styles.roundButton, { opacity: cannotSend ? 0.4 : 1 }]}>
+            <Text style={{ fontSize: 26, lineHeight: 28, color: colors.muted }}>+</Text>
+          </Pressable>
+          <TextInput
+            style={styles.composerInput}
+            value={draft}
+            onChangeText={onDraftChange}
+            placeholder="Tulis pesan"
+            placeholderTextColor={colors.muted}
+            multiline
+            editable={!cannotSend}
+            maxLength={MAX_TEXT_LENGTH}
+          />
+          <Pressable
+            onPress={send}
+            disabled={!draft.trim() || cannotSend}
+            accessibilityRole="button"
+            accessibilityLabel="Kirim pesan"
+            style={[styles.roundButton, styles.sendButton, { opacity: !draft.trim() || cannotSend ? 0.4 : 1 }]}>
+            <Text style={{ fontSize: 20, lineHeight: 22, color: colors.accentText, fontWeight: '700' }}>↑</Text>
+          </Pressable>
+        </View>
       </View>
     </KeyboardAvoidingView>
   );
@@ -724,11 +773,15 @@ const styles = themed(() => ({
     borderBottomColor: colors.border,
     backgroundColor: colors.surface,
   },
-  bubble: { maxWidth: '80%', padding: 10, borderRadius: 14, borderWidth: 1, borderColor: colors.border, gap: 2 },
+  bubble: { maxWidth: '82%', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 18, gap: 2 },
+  dayWrap: { alignItems: 'center', marginVertical: 10 },
+  dayChip: { overflow: 'hidden', paddingVertical: 3, paddingHorizontal: 12, borderRadius: 12, backgroundColor: `${colors.muted}26`, color: colors.muted, fontSize: 12 },
+  docTile: { width: 42, height: 42, borderRadius: 10, backgroundColor: `${colors.accent}24`, alignItems: 'center', justifyContent: 'center' },
+  docExt: { color: colors.accent, fontWeight: '700', fontSize: 11 },
   listContent: { padding: 16, gap: 6, flexGrow: 1, justifyContent: 'flex-end' },
   olderLoader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 8 },
-  mine: { alignSelf: 'flex-end', backgroundColor: colors.mine },
-  theirs: { alignSelf: 'flex-start', backgroundColor: colors.surface },
+  mine: { alignSelf: 'flex-end', backgroundColor: colors.mine, borderBottomRightRadius: 5 },
+  theirs: { alignSelf: 'flex-start', backgroundColor: colors.surface, borderBottomLeftRadius: 5, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
   quote: { borderLeftWidth: 3, borderLeftColor: colors.accent, backgroundColor: `${colors.accent}22`, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, marginBottom: 4 },
   quoteWho: { color: colors.accent, fontWeight: '700', fontSize: 12 },
   replying: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingTop: 6 },
@@ -737,13 +790,18 @@ const styles = themed(() => ({
   barTrack: { height: 4, borderRadius: 2, overflow: 'hidden', marginTop: 2 },
   barFill: { height: 4, borderRadius: 2 },
   docButton: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: colors.border },
-  composer: {
+  composer: { paddingHorizontal: 10, paddingTop: 6, paddingBottom: 10, backgroundColor: colors.bg },
+  composerPill: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: 8,
-    padding: 12,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
+    gap: 2,
+    padding: 4,
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: colors.border,
     backgroundColor: colors.surface,
   },
+  composerInput: { flex: 1, maxHeight: 120, minHeight: 44, paddingHorizontal: 8, paddingVertical: 10, color: colors.text, fontSize: 16 },
+  roundButton: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  sendButton: { backgroundColor: colors.accent },
 }));

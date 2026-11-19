@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
 import {
   CONVERSATION_PAGE_SIZE,
   appendConversations,
@@ -13,6 +13,7 @@ import {
 import { loadLocalConversations, saveLocalConversations } from '../lib/chatStorage';
 import { account, inbox, listConversations, rpc } from '../lib/core';
 import { AccountMenu } from '../components/AccountMenu';
+import { Avatar } from '../components/Avatar';
 import { Button } from '../components/Button';
 import { UpdateBanner } from '../components/UpdateBanner';
 import { colors, themed, ui } from '../theme';
@@ -152,7 +153,7 @@ export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
     <View style={[ui.screen, { padding: 16, gap: 12 }]}>
       <View style={[ui.row, { justifyContent: 'space-between' }]}>
         <View style={[ui.row, { gap: 8 }]}>
-          <Text style={ui.brand}>seru24</Text>
+          <Text style={styles.title}>Chat</Text>
           {syncing ? <ActivityIndicator size="small" color={colors.accent} accessibilityLabel="Menyinkronkan" /> : null}
         </View>
         <AccountMenu onSignedOut={onSignedOut} />
@@ -162,7 +163,7 @@ export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
 
       <View style={ui.row}>
         <TextInput
-          style={[ui.input, { flex: 1 }]}
+          style={[ui.input, { flex: 1, borderRadius: 24, paddingHorizontal: 18 }]}
           value={query}
           onChangeText={setQuery}
           placeholder="Cari username persis, mis. zidane_21"
@@ -191,27 +192,35 @@ export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
       <FlatList
         data={conversations}
         keyExtractor={c => c.id}
-        contentContainerStyle={{ gap: 8 }}
+        contentContainerStyle={{ paddingBottom: 24 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
         onEndReached={loadMore}
         onEndReachedThreshold={0.5}
         ListFooterComponent={loadingMore ? <ActivityIndicator style={{ paddingVertical: 12 }} /> : undefined}
         ListEmptyComponent={<Text style={[ui.muted, { textAlign: 'center', paddingVertical: 24 }]}>Belum ada percakapan. Cari teman dengan username-nya.</Text>}
         renderItem={({ item }) => (
-          <Pressable onPress={() => onOpen(item)} style={[ui.card, styles.item]}>
-            <View style={{ flex: 1 }}>
-              <Text numberOfLines={1} style={{ fontWeight: '700', color: colors.text }}>{peerLabel(item)}</Text>
-              <Text style={ui.muted}>
-                {isIncomingRequest(item, account.me?.id)
-                  ? 'Permintaan chat baru'
-                  : item.status === 'pending'
-                    ? 'Menunggu diterima'
-                    : `@${item.peer_username}`}
-              </Text>
-            </View>
-            <View style={{ alignItems: 'flex-end', gap: 4 }}>
-              <Text style={ui.muted}>{formatTime(item.last_message_at)}</Text>
-              {item.unread > 0 ? <Text style={styles.badge}>{item.unread}</Text> : null}
+          <Pressable
+            onPress={() => onOpen(item)}
+            android_ripple={{ color: `${colors.accent}22` }}
+            accessibilityRole="button"
+            accessibilityLabel={`Buka chat dengan ${peerLabel(item)}`}
+            style={styles.item}>
+            <Avatar name={peerLabel(item)} seed={item.peer_username} size={52} />
+            <View style={{ flex: 1, gap: 3 }}>
+              <View style={styles.line}>
+                <Text numberOfLines={1} style={styles.name}>{peerLabel(item)}</Text>
+                <Text style={[styles.time, item.unread > 0 ? styles.timeFresh : null]}>{formatTime(item.last_message_at)}</Text>
+              </View>
+              <View style={styles.line}>
+                <Text numberOfLines={1} style={[ui.muted, { flex: 1, fontSize: 14 }]}>
+                  {isIncomingRequest(item, account.me?.id)
+                    ? 'Permintaan chat baru'
+                    : item.status === 'pending'
+                      ? 'Menunggu diterima'
+                      : `@${item.peer_username}`}
+                </Text>
+                {item.unread > 0 ? <Text style={styles.badge}>{item.unread}</Text> : null}
+              </View>
             </View>
           </Pressable>
         )}
@@ -221,7 +230,19 @@ export const ChatListScreen = ({ onOpen, onSignedOut }: Props) => {
 };
 
 const styles = themed(() => ({
-  item: { flexDirection: 'row', alignItems: 'center', padding: 12, gap: 8 },
+  title: { fontSize: 30, fontWeight: '800', color: colors.text, letterSpacing: -0.8 },
+  item: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  line: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  name: { flex: 1, fontSize: 16, fontWeight: '600', color: colors.text },
+  time: { fontSize: 12, color: colors.muted },
+  timeFresh: { color: colors.accent, fontWeight: '600' },
   badge: {
     minWidth: 22,
     paddingHorizontal: 7,

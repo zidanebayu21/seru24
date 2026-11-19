@@ -4,7 +4,7 @@ import { errorMessage } from '../../../web/shared/secure-fetch-core';
 import { finishSignIn, session, signOut, webUrl } from '../lib/core';
 import { Button } from '../components/Button';
 import { PASSWORD_MIN_LENGTH as PASSWORD_MIN } from '../env';
-import { colors, ui } from '../theme';
+import { colors, themed, ui } from '../theme';
 
 const USERNAME_PATTERN = /^[a-z0-9_]{3,30}$/;
 
@@ -77,10 +77,17 @@ export const AuthScreen = ({ onSignedIn }: Props) => {
   return (
     <KeyboardAvoidingView style={ui.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', padding: 16 }} keyboardShouldPersistTaps="handled">
-        <View style={ui.card}>
-          <Text style={ui.brand}>seru24</Text>
-          <Text style={ui.title}>{isLogin ? 'Masuk' : 'Daftar'}</Text>
-          <Text style={ui.muted}>Chat terenkripsi end-to-end</Text>
+        <View style={styles.panel}>
+          <View style={styles.logoRow}>
+            <View style={styles.logoTile}>
+              <Text style={styles.logoText}>24</Text>
+            </View>
+            <Text style={styles.wordmark}>seru24</Text>
+          </View>
+          <View style={{ gap: 4 }}>
+            <Text style={ui.title}>{isLogin ? 'Masuk' : 'Daftar'}</Text>
+            <Text style={ui.muted}>Obrolan terenkripsi end-to-end yang hanya bisa dibaca kalian berdua.</Text>
+          </View>
           {notice ? <Text style={ui.notice}>{notice}</Text> : null}
 
           {isLogin ? (
@@ -122,6 +129,14 @@ export const AuthScreen = ({ onSignedIn }: Props) => {
     </KeyboardAvoidingView>
   );
 };
+
+const styles = themed(() => ({
+  panel: { gap: 16, paddingHorizontal: 4 },
+  logoRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
+  logoTile: { width: 40, height: 40, borderRadius: 12, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
+  logoText: { color: colors.accentText, fontWeight: '800', fontSize: 16 },
+  wordmark: { color: colors.text, fontWeight: '700', fontSize: 20, letterSpacing: -0.4 },
+}));
 
 interface FieldProps {
   label: string;
