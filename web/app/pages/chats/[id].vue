@@ -550,8 +550,8 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
         </div>
         <p v-else class="text">{{ b.text }}</p>
         <p v-if="b.progress" class="muted progress">{{ b.progress }}</p>
-        <div v-if="b.progress && b.fraction !== undefined" class="bar" role="progressbar" :aria-valuenow="Math.round(b.fraction * 100)" aria-valuemin="0" aria-valuemax="100">
-          <div class="bar-fill" :style="{ width: Math.round(b.fraction * 100) + '%' }" />
+        <div v-if="b.progress && b.fraction !== undefined" class="meter" role="progressbar" :aria-valuenow="Math.round(b.fraction * 100)" aria-valuemin="0" aria-valuemax="100">
+          <div class="meter-fill" :style="{ width: Math.round(b.fraction * 100) + '%' }" />
         </div>
         <div class="foot row">
           <span class="muted">{{ status(b).text }}</span>
@@ -633,6 +633,7 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
   gap: 8px;
   padding: 10px 14px 14px;
 }
+.chat > :not(.messages) { flex: none; }
 .bar { gap: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
 .back { display: grid; place-items: center; width: 36px; height: 36px; margin-left: -6px; border-radius: 50%; color: var(--text); }
 .back:hover { background: color-mix(in srgb, var(--text) 8%, transparent); }
@@ -751,6 +752,6 @@ onMounted(() => load().catch(() => { error.value = 'Gagal memuat percakapan' }))
 .doc-info { display: flex; flex-direction: column; min-width: 0; }
 .doc-name { overflow-wrap: anywhere; }
 .progress { font-size: 12px; }
-.bar { height: 4px; border-radius: 2px; overflow: hidden; background: var(--border); }
-.bar-fill { height: 100%; background: var(--accent); transition: width 0.2s linear; }
+.meter { height: 4px; border-radius: 2px; overflow: hidden; background: var(--border); }
+.meter-fill { height: 100%; background: var(--accent); transition: width 0.2s linear; }
 </style>
