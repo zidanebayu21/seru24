@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { FlatList, KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from 'react-native';
 import { MAX_TEXT_LENGTH } from '../../../web/shared/crypto';
 import { formatTime } from '../../../web/shared/chat-core';
-import { onRadarChange, readyPeerFor, sendStrangerText } from '../lib/radar';
+import { onRadarChange, readyPeerFor, sendStrangerText, setRadarActiveChat, strangerKey } from '../lib/radar';
 import { loadStrangers, onStrangersChange, type StrangerMessage, type StrangerSession } from '../lib/strangers';
 import { Avatar } from '../components/Avatar';
 import { colors, themed, ui } from '../theme';
@@ -36,6 +36,11 @@ export const NearbyChatScreen = ({ userId, onBack }: Props) => {
     const sync = () => setConnected(Boolean(readyPeerFor(userId)));
     sync();
     return onRadarChange(sync);
+  }, [userId]);
+
+  useEffect(() => {
+    setRadarActiveChat(strangerKey(userId));
+    return () => setRadarActiveChat(null);
   }, [userId]);
 
   const data = useMemo(() => [...(session?.messages ?? [])].reverse(), [session]);

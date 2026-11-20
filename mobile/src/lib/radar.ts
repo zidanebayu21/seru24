@@ -83,6 +83,10 @@ const changeListeners = new Set<() => void>();
 const messageListeners = new Set<(event: RadarMessageEvent) => void>();
 const ackListeners = new Set<(clientMsgId: string) => void>();
 let unsubscribe: (() => void) | null = null;
+// Belum dibaca per obrolan (kunci: id percakapan untuk kontak, "stranger:<userId>" untuk orang baru). Hanya di memori.
+const unread = new Map<string, number>();
+let activeChat: string | null = null;
+export const strangerKey = (userId: string) => `stranger:${userId}`;
 
 const notifyChange = () => {
   for (const listener of changeListeners) listener();
@@ -92,6 +96,19 @@ export const radarSupported = nearbySupported;
 export const isRadarOn = () => active;
 export const getRadarPeers = (): RadarPeer[] => [...peers.values()];
 export const getRadarWarning = () => lastWarning;
+export const getNearbyUnread = (key: string) => unread.get(key) ?? 0;
+export const getStrangerUnreadTotal = () =>
+  [...unread].reduce((sum, [key, count]) => (key.startsWith('stranger:') ? sum + count : sum), 0);
+/** Layar obrolan yang sedang terbuka tidak menambah belum dibaca; membukanya mengosongkan hitungan. */
+export const setRadarActiveChat = (key: string | null) => {
+  activeChat = key;
+  if (key && unread.delete(key)) notifyChange();
+};
+const bumpUnread = (key: string) => {
+  if (key === activeChat) return;
+  unread.set(key, (unread.get(key) ?? 0) + 1);
+  notifyChange();
+};
 /** Penyebab kegagalan menyalakan siaran terakhir (dari Google Play Services), untuk ditampilkan ke pengguna. */
 export const getRadarError = () => lastError;
 export const onRadarChange = (listener: () => void) => {
@@ -280,11 +297,13 @@ const handleMessage = async (peer: RadarPeer, wire: Extract<ReturnType<typeof pa
   await sendNearby(peer.endpointId, encodeNearbyAck(message.client_msg_id)).catch(() => undefined);
   if (trustedContact) {
     await saveNearbyReceived(message);
+    bumpUnread(conversationId);
     emitMessage({ kind: 'contact', conversationId, message });
     return;
   }
   const record: StrangerMessage = { id: message.client_msg_id, mine: false, text, createdAt: message.created_at, acked: true, synced: false };
-  await addStrangerMessage(identity.userId, record);
+  const isNew = await addStrangerMessage(identity.userId, record);
+  if (isNew) bumpUnread(strangerKey(identity.userId));
   emitMessage({ kind: 'stranger', userId: identity.userId });
 };
 

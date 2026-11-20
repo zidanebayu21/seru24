@@ -4,6 +4,7 @@ import {
   CHAT_PAGE_SIZE,
   CHAT_PREFETCH_OFFSET,
   bubbleStatus,
+  compareBubbles,
   markMessageDeleted,
   mergeCachedMessages,
   mergePagedBubbles,
@@ -40,6 +41,18 @@ describe('paginasi pesan', () => {
       { key: 'local', seq: 0, pending: true },
     ]
     expect(mergePagedBubbles(older, current).map((x) => x.key)).toEqual(['m1', 'm2', 'm3', 'local'])
+  })
+
+  it('pesan tanpa seq (antrean, diterima langsung) di bawah pesan server dan sesamanya urut waktu', () => {
+    const current = [
+      { key: 'm1', seq: 1, pending: false, createdAt: '2026-11-19T10:00:00Z' },
+      { key: 'kirim-lama', seq: 0, pending: true, createdAt: '2026-11-19T10:05:00Z' },
+      { key: 'terima-lama', seq: 0, pending: false, createdAt: '2026-11-19T10:06:00Z' },
+    ]
+    // pesan baru yang diterima langsung ditambahkan paling depan, tapi tetap tampil paling bawah menurut waktu
+    const merged = mergePagedBubbles([{ key: 'terima-baru', seq: 0, pending: false, createdAt: '2026-11-19T10:07:00Z' }], current)
+    expect(merged.map((x) => x.key)).toEqual(['m1', 'kirim-lama', 'terima-lama', 'terima-baru'])
+    expect(compareBubbles({ key: 'a', seq: 0, pending: false }, { key: 'b', seq: 0, pending: false })).toBe(0)
   })
 
   it('menggabungkan cache lokal dengan pesan server sambil menjaga hapus lokal', () => {

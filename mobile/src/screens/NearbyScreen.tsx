@@ -9,12 +9,14 @@ import {
   connectTo,
   getRadarError,
   getRadarPeers,
+  getNearbyUnread,
   getRadarWarning,
   isRadarOn,
   onRadarChange,
   radarSupported,
   rejectIncoming,
   startRadar,
+  strangerKey,
   stopRadar,
   type RadarPeer,
 } from '../lib/radar';
@@ -133,6 +135,9 @@ export const NearbyScreen = ({ onBack, onOpenStranger, onOpenContact }: Props) =
               <Text style={styles.name}>@{peer.identity?.username}</Text>
               <Text style={ui.muted}>{peer.contact && peer.trusted ? 'Kontak' : 'Orang baru'} · tersambung langsung</Text>
             </View>
+            {peer.identity && getNearbyUnread(strangerKey(peer.identity.userId)) > 0 ? (
+              <Text style={styles.badge}>{getNearbyUnread(strangerKey(peer.identity.userId))}</Text>
+            ) : null}
           </Pressable>
         ))}
 
@@ -179,6 +184,7 @@ export const NearbyScreen = ({ onBack, onOpenStranger, onOpenContact }: Props) =
                   {unsynced > 0 ? ` · ${unsynced} menunggu internet` : ''}
                 </Text>
               </View>
+              {getNearbyUnread(strangerKey(session.userId)) > 0 ? <Text style={styles.badge}>{getNearbyUnread(strangerKey(session.userId))}</Text> : null}
             </Pressable>
           );
         })}
@@ -199,4 +205,16 @@ const styles = themed(() => ({
     backgroundColor: colors.surface,
   },
   name: { color: colors.text, fontWeight: '600' },
+  badge: {
+    minWidth: 22,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 11,
+    overflow: 'hidden',
+    textAlign: 'center',
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.accentText,
+    backgroundColor: colors.accent,
+  },
 }));

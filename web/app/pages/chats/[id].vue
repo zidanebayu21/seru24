@@ -18,6 +18,7 @@ import {
 } from '#shared/chat-core'
 import { MAX_PINS, addPin, canPin, parsePins, pinsNewestFirst, pinsStorageKey, prunePins, removePin } from '#shared/pin-core'
 import { createConversationPresence, type PeerPresence } from '#shared/presence-core'
+import { createCallController, type CallEndReason, type CallPhase } from '#shared/call-core'
 import { searchMessages } from '#shared/search-core'
 import {
   SCHEDULE_ERRORS,
@@ -152,6 +153,50 @@ const replyingTo = ref<Bubble | null>(null)
 const peerPresence = ref<PeerPresence>({ online: false, typing: false })
 let presence: ReturnType<typeof createConversationPresence> | null = null
 
+const CALL_END_TEXT: Record<CallEndReason, string> = {
+  hangup: 'Panggilan selesai',
+  rejected: 'Panggilan ditolak',
+  busy: 'Lawan bicara sedang dalam panggilan lain',
+  timeout: 'Panggilan tidak dijawab',
+  failed: 'Panggilan gagal tersambung (jaringan mungkin memblokir sambungan langsung)',
+  'mic-denied': 'Izin mikrofon ditolak',
+}
+const CALL_NOTE_MS = 5000
+const callPhase = ref<CallPhase>('idle')
+const callMuted = ref(false)
+const callNote = ref('')
+const remoteAudio = ref<HTMLAudioElement | null>(null)
+let call: ReturnType<typeof createCallController> | null = null
+let callNoteTimer: ReturnType<typeof setTimeout> | undefined
+
+const callTitle = computed(() => {
+  if (callPhase.value === 'calling') return 'Memanggil…'
+  if (callPhase.value === 'incoming') return 'Panggilan suara masuk'
+  if (callPhase.value === 'connecting') return 'Menyambungkan…'
+  return 'Sedang berbicara'
+})
+
+const toggleMute = () => { callMuted.value = call?.setMuted(!callMuted.value) ?? false }
+
+const makeCall = (myId: string) => createCallController({
+  myId,
+  send: (signal) => presence?.sendCallSignal(signal),
+  onPhase: (phase) => {
+    callPhase.value = phase
+    if (phase === 'idle') callMuted.value = false
+    else callNote.value = ''
+  },
+  onRemoteStream: (stream) => {
+    if (remoteAudio.value) remoteAudio.value.srcObject = stream as MediaStream | null
+  },
+  onEnd: (reason) => {
+    callNote.value = CALL_END_TEXT[reason]
+    clearTimeout(callNoteTimer)
+    callNoteTimer = setTimeout(() => { callNote.value = '' }, CALL_NOTE_MS)
+  },
+  newCallId: randomId,
+})
+
 const peerId = () => conversation.value?.peer_id ?? ''
 
 const toBubble = async (m: ChatMessage): Promise<Bubble> => ({
@@ -188,12 +233,21 @@ const startPresence = () => {
   if (!myId || !useRuntimeConfig().public.realtimePresence) return
   ensureSupabase().then((client) => {
     if (closed) return
-    presence = createConversationPresence(client, conversationId, myId, (state) => { peerPresence.value = state })
+    call = makeCall(myId)
+    presence = createConversationPresence(
+      client,
+      conversationId,
+      myId,
+      (state) => { peerPresence.value = state },
+      (signal) => { void call?.handleSignal(signal) },
+    )
   }, () => undefined)
 }
 let closed = false
 onBeforeUnmount(() => {
   closed = true
+  call?.hangup()
+  clearTimeout(callNoteTimer)
   presence?.close()
 })
 
@@ -965,11 +1019,33 @@ onMounted(() => load().then(() => loadScheduled()).catch(() => { error.value = '
         <strong>{{ peerLabel(conversation) }}</strong>
         <p class="muted" :class="{ typing: peerPresence.typing }">{{ subtitle }}</p>
       </div>
+      <button
+        type="button"
+        class="ghost icon"
+        aria-label="Telepon suara"
+        :title="peerPresence.online ? 'Telepon suara' : 'Lawan bicara harus membuka percakapan ini'"
+        :disabled="!peerPresence.online || callPhase !== 'idle'"
+        @click="call?.start()"
+      >
+        <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z" /></svg>
+      </button>
       <button type="button" class="ghost icon" aria-label="Cari pesan" title="Cari pesan" :aria-expanded="searchOpen" @click="searchOpen ? closeSearch() : openSearch()">
         <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5" /><path d="M16 16l4.5 4.5" /></svg>
       </button>
       <button type="button" class="ghost" :aria-expanded="showSafety" @click="showSafety = !showSafety">Keamanan</button>
     </header>
+
+    <section v-if="callPhase !== 'idle'" class="panel callbar" role="status" aria-live="polite">
+      <strong>{{ callTitle }}</strong>
+      <div class="row">
+        <button v-if="callPhase === 'incoming'" type="button" @click="call?.accept()">Terima</button>
+        <button v-if="callPhase === 'incoming'" type="button" class="ghost" @click="call?.reject()">Tolak</button>
+        <button v-if="callPhase === 'connected'" type="button" class="ghost" :aria-pressed="callMuted" @click="toggleMute">{{ callMuted ? 'Bunyikan' : 'Bisukan' }}</button>
+        <button v-if="callPhase !== 'incoming'" type="button" class="ghost" @click="call?.hangup()">Akhiri</button>
+      </div>
+    </section>
+    <p v-else-if="callNote" class="muted callnote" role="status">{{ callNote }}</p>
+    <audio ref="remoteAudio" autoplay playsinline />
 
     <section v-if="pinBubbles.length" class="panel pinbar" aria-label="Pesan tersemat">
       <button type="button" class="pin-top" :aria-expanded="pinsOpen" @click="pinsOpen = !pinsOpen">
@@ -1374,6 +1450,8 @@ onMounted(() => load().then(() => loadScheduled()).catch(() => { error.value = '
 .replying { gap: 8px; align-items: center; }
 .replying .grow { flex: 1; min-width: 0; margin-bottom: 0; }
 .typing { color: var(--accent); font-style: italic; }
+.callbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 8px 0; }
+.callnote { margin: 6px 0; text-align: center; font-size: 13px; }
 .composer {
   align-items: flex-end;
   gap: 4px;

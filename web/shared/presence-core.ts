@@ -3,6 +3,7 @@
 // tanpa tabel, tanpa isi pesan. "Online" = lawan sedang membuka percakapan ini.
 
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js'
+import { CALL_EVENT, type CallSignal } from './call-core'
 
 /** Sinyal mengetik dikirim paling sering sekali per 3 detik agar hemat kuota pesan Realtime. */
 export const TYPING_SEND_INTERVAL_MS = 3000
@@ -19,6 +20,7 @@ export const createConversationPresence = (
   conversationId: string,
   myId: string,
   onChange: (state: PeerPresence) => void,
+  onCallSignal?: (signal: CallSignal) => void,
 ) => {
   let state: PeerPresence = { online: false, typing: false }
   let typingTimer: ReturnType<typeof setTimeout> | undefined
@@ -41,6 +43,9 @@ export const createConversationPresence = (
     emit({ typing: true })
     typingTimer = setTimeout(() => emit({ typing: false }), TYPING_VISIBLE_MS)
   })
+  if (onCallSignal) {
+    channel.on('broadcast', { event: CALL_EVENT }, ({ payload }) => onCallSignal(payload as CallSignal))
+  }
   channel.subscribe((status) => {
     if (status === 'SUBSCRIBED') channel.track({ at: Date.now() }).catch(() => undefined)
   })
@@ -51,6 +56,11 @@ export const createConversationPresence = (
     if (now - lastSent < TYPING_SEND_INTERVAL_MS) return
     lastSent = now
     channel.send({ type: 'broadcast', event: 'typing', payload: { user_id: myId } }).catch(() => undefined)
+  }
+
+  /** Sinyal panggilan suara (lihat call-core) untuk lawan bicara di percakapan ini. */
+  const sendCallSignal = (signal: CallSignal) => {
+    channel.send({ type: 'broadcast', event: CALL_EVENT, payload: signal }).catch(() => undefined)
   }
 
   /** Pesan baru dari lawan masuk: tanda mengetik dihapus. */
@@ -64,5 +74,5 @@ export const createConversationPresence = (
     client.removeChannel(channel).catch(() => undefined)
   }
 
-  return { notifyTyping, clearPeerTyping, close }
+  return { notifyTyping, clearPeerTyping, sendCallSignal, close }
 }

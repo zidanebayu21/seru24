@@ -23,6 +23,7 @@ import {
   radarSupported,
   readyPeerFor,
   sendContactMessage,
+  setRadarActiveChat,
   startRadar,
   stopRadar,
 } from '../lib/radar';
@@ -72,6 +73,8 @@ import { downloadFile, findSavedFile, openSavedFile, pickFiles, uploadFile, type
 import { notifyMessageSent } from '../lib/notify';
 import { onVoiceState, pauseVoice, playVoice, resumeVoice, stopVoice, type VoiceState } from '../lib/audio';
 import { Button } from '../components/Button';
+import { CallBar } from '../components/CallBar';
+import { useVoiceCall } from '../lib/useVoiceCall';
 import { ScheduleSheet } from '../components/ScheduleSheet';
 import { MenuItem, PopupMenu } from '../components/PopupMenu';
 import { colors, themed, ui } from '../theme';
@@ -95,15 +98,15 @@ interface Bubble {
   savedUri: string | null;
   /** id pesan yang dibalas (kolom reply_to). */
   replyTo: string | null;
+  /** Sudah sampai ke HP lawan lewat Siaran Dekat: tampil seperti pesan biasa (jam dan centang), tanpa keterangan khusus. */
+  direct?: boolean;
 }
 
 type SendParams = Awaited<ReturnType<typeof e2ee.encryptText>> & { p_attachment_id?: string; p_reply_to?: string | null };
 
 const SAVED_NOTE = 'Tersimpan di Download/seru24';
 const QUEUED_NOTE = 'Menunggu sinyal, terkirim otomatis saat online';
-const DIRECT_NOTE = 'Dikirim langsung, tersimpan di server saat online';
 const RESEND_MS = 5000;
-const DIRECT_ACK_NOTE = 'Diterima langsung, tersimpan di server saat online';
 /** Pesan antrean dalam bentuk ChatMessage agar bisa didekripsi dan ditampilkan seperti pesan lain. */
 const queuedAsMessage = (item: QueuedMessage, myId: string | null): ChatMessage => ({
   id: item.params.p_client_msg_id,
@@ -138,6 +141,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
   const [replyingTo, setReplyingTo] = useState<Bubble | null>(null);
   const [peerPresence, setPeerPresence] = useState<PeerPresence>({ online: false, typing: false });
   const presenceRef = useRef<ReturnType<typeof openConversationPresence>>(null);
+  const voiceCall = useVoiceCall(presenceRef);
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
@@ -246,6 +250,12 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     return () => back.remove();
   }, [onBack]);
 
+  // chat yang sedang dibuka tidak menambah belum dibaca di daftar chat
+  useEffect(() => {
+    setRadarActiveChat(conversation.id);
+    return () => setRadarActiveChat(null);
+  }, [conversation.id]);
+
   // Status siaran dan apakah lawan bicara ini sedang tersambung langsung
   useEffect(() => {
     const sync = () => {
@@ -269,7 +279,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     });
     const offAck = onRadarAck(clientMsgId => {
       ackedRef.current.add(clientMsgId);
-      updateBubble(clientMsgId, { progress: DIRECT_ACK_NOTE });
+      updateBubble(clientMsgId, { direct: true, progress: '' });
     });
     return () => {
       offMessage();
@@ -352,7 +362,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         setPreparing(false);
         if (ready !== 'ready' && ready !== 'offline') return;
         if (ready === 'ready') {
-          presenceRef.current = openConversationPresence(conversation.id, setPeerPresence);
+          presenceRef.current = openConversationPresence(conversation.id, setPeerPresence, voiceCall.onSignal);
           // centang dua tetap benar setelah chat dibuka ulang
           rpc<number>('seru24_peer_read_seq', { p_conversation_id: conversation.id })
             .then(seq => setPeerReadSeq(prev => Math.max(prev, Number(seq) || 0)))
@@ -603,7 +613,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         await queueMessage({ conversationId: conversation.id, params, queuedAt });
         // Mode Dekat tersambung: kirim juga langsung ke HP lawan bicara; salinan server menyusul lewat antrean
         const direct = peerNear && (await sendContactMessage(peerId, params, queuedAt));
-        updateBubble(params.p_client_msg_id, { progress: direct ? DIRECT_NOTE : QUEUED_NOTE });
+        updateBubble(params.p_client_msg_id, direct ? { direct: true, progress: '' } : { progress: QUEUED_NOTE });
         return;
       }
       throw error;
@@ -932,6 +942,13 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     if (!(await startRadar())) setError(`Siaran Dekat gagal dimulai${getRadarError() ? `: ${getRadarError()}` : ''}. Pastikan Bluetooth dan Wi-Fi aktif`);
   };
 
+  /** Jam dan centang di bawah gelembung; pesan yang sudah sampai lewat Siaran Dekat tampil seperti pesan biasa. */
+  const statusOf = (item: Bubble) => {
+    const shown = item.direct ? { ...item, pending: false } : item;
+    const status = bubbleStatus(shown, peerReadSeq);
+    return shown.pending || shown.failed ? status : { ...status, text: formatClock(item.createdAt) };
+  };
+
   /** Tekan lama pada gelembung: balas, atau hapus (pesan sendiri). Pesan yang belum punya id server (seq 0) tidak bisa. */
   const showActions = (item: Bubble) => {
     if (!item.id || item.pending || item.deleted || item.seq <= 0) return;
@@ -960,6 +977,15 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         </View>
         <Pressable
           accessibilityRole="button"
+          accessibilityLabel="Telepon suara"
+          disabled={!peerPresence.online || voiceCall.phase !== 'idle'}
+          onPress={voiceCall.start}
+          hitSlop={8}
+          style={{ paddingHorizontal: 8, paddingVertical: 8, opacity: peerPresence.online && voiceCall.phase === 'idle' ? 1 : 0.4 }}>
+          <Text style={{ color: colors.accent, fontWeight: '600' }}>Telepon</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
           accessibilityLabel="Cari pesan"
           onPress={() => (searchOpen ? closeSearch() : openSearch())}
           hitSlop={8}
@@ -975,6 +1001,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
           <Text style={{ fontSize: 22, lineHeight: 22, color: colors.text }}>⋮</Text>
         </Pressable>
       </View>
+      <CallBar call={voiceCall} />
       {searchOpen ? (
         <View style={styles.searchPanel}>
           <View style={ui.row}>
@@ -1220,12 +1247,12 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
               </View>
             ) : null}
             <View style={[ui.row, { justifyContent: 'flex-end', gap: 10 }]}>
-              <Text style={[ui.muted, { fontSize: 11 }]}>{item.pending || item.failed ? bubbleStatus(item, peerReadSeq).text : formatClock(item.createdAt)}</Text>
-              {bubbleStatus(item, peerReadSeq).ticks ? (
+              <Text style={[ui.muted, { fontSize: 11 }]}>{statusOf(item).text}</Text>
+              {statusOf(item).ticks ? (
                 <Text
-                  accessibilityLabel={bubbleStatus(item, peerReadSeq).read ? 'Dibaca' : 'Terkirim'}
-                  style={[styles.ticks, bubbleStatus(item, peerReadSeq).read ? styles.ticksRead : null]}>
-                  {bubbleStatus(item, peerReadSeq).ticks}
+                  accessibilityLabel={statusOf(item).read ? 'Dibaca' : 'Terkirim'}
+                  style={[styles.ticks, statusOf(item).read ? styles.ticksRead : null]}>
+                  {statusOf(item).ticks}
                 </Text>
               ) : null}
             </View>

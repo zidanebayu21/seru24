@@ -10,6 +10,7 @@ import { createAccountCore, type AccountState, type AccountStatus, type Me } fro
 import { createE2ee } from '../../../web/shared/e2ee-core';
 import { createInbox } from '../../../web/shared/inbox-core';
 import { createConversationPresence, type PeerPresence } from '../../../web/shared/presence-core';
+import type { CallSignal } from '../../../web/shared/call-core';
 import { listConversationsArgs, type Conversation, type ListConversationsOptions } from '../../../web/shared/chat-core';
 import { API_BASE_URL, REALTIME_PRESENCE, SUPABASE_ANON_KEY, SUPABASE_URL } from '../env';
 import { installNativeScrypt } from './nativeScrypt';
@@ -181,9 +182,13 @@ export const onOnlineChange = (listener: (value: boolean) => void) => {
 export const inbox = createInbox(getSupabase, () => account.me?.id);
 
 /** Status online & mengetik lawan di percakapan ini; null bila dimatikan lewat REALTIME_PRESENCE=false. */
-export const openConversationPresence = (conversationId: string, onChange: (state: PeerPresence) => void) =>
+export const openConversationPresence = (
+  conversationId: string,
+  onChange: (state: PeerPresence) => void,
+  onCallSignal?: (signal: CallSignal) => void,
+) =>
   REALTIME_PRESENCE && account.me?.id
-    ? createConversationPresence(getSupabase(), conversationId, account.me.id, onChange)
+    ? createConversationPresence(getSupabase(), conversationId, account.me.id, onChange, onCallSignal)
     : null;
 
 export const listConversations = (options?: ListConversationsOptions) =>

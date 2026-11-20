@@ -131,6 +131,8 @@ export interface PagedBubble {
   key: string
   seq: number
   pending: boolean
+  /** Waktu pesan; dipakai mengurutkan sesama pesan yang belum punya seq (antrean, Siaran Dekat). */
+  createdAt?: string
 }
 
 /** seq terkecil dari pesan yang sudah tersimpan di server (untuk p_before_seq paginasi). */
@@ -143,10 +145,14 @@ export const oldestPersistedSeq = (items: readonly PagedBubble[]): number | null
 }
 
 /** Gabungkan halaman pesan lama ke daftar yang sudah ada tanpa duplikat key, tetap urut naik. */
-/** Urutan tampil: pesan tersimpan menurut seq; yang belum tersimpan (mengirim/gagal, seq 0) selalu paling bawah. */
+/**
+ * Urutan tampil: pesan tersimpan menurut seq; yang belum tersimpan (mengirim/gagal, seq 0) selalu paling bawah dan
+ * sesamanya menurut waktu, supaya pesan yang diterima langsung (Siaran Dekat) tidak naik di atas pesan yang lebih lama.
+ */
 export const compareBubbles = (a: PagedBubble, b: PagedBubble): number => {
   const rank = (x: PagedBubble) => (x.pending || x.seq <= 0 ? Infinity : x.seq)
-  return rank(a) === rank(b) ? 0 : rank(a) - rank(b)
+  if (rank(a) !== rank(b)) return rank(a) - rank(b)
+  return rank(a) === Infinity ? (a.createdAt ?? '').localeCompare(b.createdAt ?? '') : 0
 }
 
 export const mergePagedBubbles = <T extends PagedBubble>(incoming: readonly T[], current: readonly T[]): T[] => {

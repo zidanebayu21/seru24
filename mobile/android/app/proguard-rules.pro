@@ -8,3 +8,6 @@
 #   http://developer.android.com/guide/developing/tools/proguard.html
 
 # Add any project specific keep options here:
+
+# react-native-webrtc: dekoder AV1 opsional (dav1d) tidak disertakan; panggilan hanya suara
+-dontwarn org.webrtc.Dav1dDecoder$Natives

@@ -81,15 +81,18 @@ export const upsertStranger = (identity: { userId: string; username: string; key
     return [session, ...list.filter(s => s.userId !== identity.userId)];
   });
 
-/** Tambah pesan tanpa duplikat (id sama diabaikan). */
-export const addStrangerMessage = (userId: string, message: StrangerMessage) =>
-  update(list =>
-    list.map(s =>
-      s.userId !== userId || s.messages.some(m => m.id === message.id)
-        ? s
-        : { ...s, updatedAt: new Date().toISOString(), messages: [...s.messages, message].slice(-MAX_MESSAGES) },
-    ),
+/** Tambah pesan tanpa duplikat (id sama diabaikan). Mengembalikan true bila pesan benar-benar baru. */
+export const addStrangerMessage = async (userId: string, message: StrangerMessage): Promise<boolean> => {
+  let added = false;
+  await update(list =>
+    list.map(s => {
+      if (s.userId !== userId || s.messages.some(m => m.id === message.id)) return s;
+      added = true;
+      return { ...s, updatedAt: new Date().toISOString(), messages: [...s.messages, message].slice(-MAX_MESSAGES) };
+    }),
   );
+  return added;
+};
 
 export const markStrangerAcked = (clientMsgId: string) =>
   update(list => list.map(s => ({ ...s, messages: s.messages.map(m => (m.id === clientMsgId ? { ...m, acked: true } : m)) })));

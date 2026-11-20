@@ -14,7 +14,18 @@ import { loadLocalConversations, saveLocalConversations } from '../lib/chatStora
 import { account, inbox, listConversations, rpc } from '../lib/core';
 import { getPreview, previewFromEvent, refreshPreviews } from '../lib/previews';
 import { requestNearbyPermissions } from '../lib/nearby';
-import { getRadarError, getRadarPeers, isRadarOn, onRadarChange, radarSupported, startRadar, stopRadar } from '../lib/radar';
+import {
+  getNearbyUnread,
+  getRadarError,
+  getRadarPeers,
+  getStrangerUnreadTotal,
+  isRadarOn,
+  onRadarChange,
+  onRadarMessage,
+  radarSupported,
+  startRadar,
+  stopRadar,
+} from '../lib/radar';
 import { isStandby, loadStandby, setStandby } from '../lib/standby';
 import { AccountMenu } from '../components/AccountMenu';
 import { Avatar } from '../components/Avatar';
@@ -53,14 +64,41 @@ export const ChatListScreen = ({ onOpen, onOpenNearby, onSignedOut }: Props) => 
   // Siaran Dekat: umumkan diri dan cari HP lain tanpa internet; sesama kontak tersambung otomatis
   const [radarOn, setRadarOn] = useState(isRadarOn());
   const [radarRequests, setRadarRequests] = useState(0);
+  const [strangerUnread, setStrangerUnread] = useState(getStrangerUnreadTotal());
   useEffect(() => {
     const sync = () => {
       setRadarOn(isRadarOn());
       setRadarRequests(getRadarPeers().filter(p => p.phase === 'incoming').length);
+      setStrangerUnread(getStrangerUnreadTotal());
+      setPreviewTick(tick => tick + 1); // badge belum dibaca kontak ikut dihitung ulang
     };
     sync();
     return onRadarChange(sync);
   }, []);
+
+  // Pesan kontak yang masuk lewat Siaran Dekat (tanpa internet): cuplikan dan urutan daftar langsung diperbarui
+  useEffect(
+    () =>
+      onRadarMessage(event => {
+        if (event.kind !== 'contact') return;
+        const { message } = event;
+        const target = conversationsRef.current.find(c => c.id === event.conversationId);
+        if (!target) return;
+        previewFromEvent(message as unknown as Record<string, unknown>, target.peer_id)
+          .then(changed => {
+            if (changed) setPreviewTick(tick => tick + 1);
+          })
+          .catch(() => undefined);
+        setConversations(prev =>
+          prev
+            .map(c => (c.id === target.id ? { ...c, last_message_at: message.created_at } : c))
+            .sort((a, b) =>
+              a.pinned !== b.pinned ? (a.pinned ? -1 : 1) : String(b.last_message_at ?? '').localeCompare(String(a.last_message_at ?? '')),
+            ),
+        );
+      }),
+    [],
+  );
 
   const toggleRadar = async (on: boolean) => {
     if (!on) {
@@ -247,7 +285,8 @@ export const ChatListScreen = ({ onOpen, onOpenNearby, onSignedOut }: Props) => 
       {radarOn ? (
         <Pressable accessibilityRole="button" onPress={onOpenNearby} style={ui.notice}>
           <Text style={{ color: colors.text }}>
-            Siaran Dekat aktif{radarRequests > 0 ? ` · ${radarRequests} permintaan baru` : ''}. Ketuk untuk melihat orang di sekitar.
+            Siaran Dekat aktif{radarRequests > 0 ? ` · ${radarRequests} permintaan baru` : ''}
+            {strangerUnread > 0 ? ` · ${strangerUnread} pesan baru` : ''}. Ketuk untuk melihat orang di sekitar.
           </Text>
         </Pressable>
       ) : null}
@@ -301,17 +340,17 @@ export const ChatListScreen = ({ onOpen, onOpenNearby, onSignedOut }: Props) => 
             <View style={{ flex: 1, gap: 3 }}>
               <View style={styles.line}>
                 <Text numberOfLines={1} style={styles.name}>{peerLabel(item)}</Text>
-                <Text style={[styles.time, item.unread > 0 ? styles.timeFresh : null]}>{formatTime(item.last_message_at)}</Text>
+                <Text style={[styles.time, item.unread + getNearbyUnread(item.id) > 0 ? styles.timeFresh : null]}>{formatTime(item.last_message_at)}</Text>
               </View>
               <View style={styles.line}>
-                <Text numberOfLines={1} style={[ui.muted, { flex: 1, fontSize: 14 }, item.unread > 0 ? { color: colors.text, fontWeight: '600' } : null]}>
+                <Text numberOfLines={1} style={[ui.muted, { flex: 1, fontSize: 14 }, item.unread + getNearbyUnread(item.id) > 0 ? { color: colors.text, fontWeight: '600' } : null]}>
                   {isIncomingRequest(item, account.me?.id)
                     ? 'Permintaan chat baru'
                     : item.status === 'pending'
                       ? 'Menunggu diterima'
                       : (getPreview(item.id)?.text ?? `@${item.peer_username}`)}
                 </Text>
-                {item.unread > 0 ? <Text style={styles.badge}>{item.unread}</Text> : null}
+                {item.unread + getNearbyUnread(item.id) > 0 ? <Text style={styles.badge}>{item.unread + getNearbyUnread(item.id)}</Text> : null}
               </View>
             </View>
           </Pressable>
