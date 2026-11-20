@@ -204,6 +204,8 @@ export const nearbyAsMessage = (m: NearbyMessage, conversationId: string, peerId
   recipient_key_version: m.recipient_key_version,
   reply_to: m.reply_to,
   created_at: clampCreatedAt(m.created_at, now),
+  // diterima langsung = dikirim saat tidak ada internet: waktu kirimnya menjadi acuan urutan walau salinan server tiba belakangan
+  offline_sent_at: clampCreatedAt(m.created_at, now),
   edited_at: null,
   deleted_at: null,
   expires_at: null,

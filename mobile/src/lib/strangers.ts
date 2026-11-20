@@ -1,6 +1,7 @@
-import type { FoundUser, SendResult } from '../../../web/shared/chat-core';
+import type { FoundUser } from '../../../web/shared/chat-core';
 import type { ChatMessage } from '../../../web/shared/e2ee-core';
 import { account, e2ee, isOnline, listConversations, rpc, readSetting, writeSetting } from './core';
+import { sendWithOfflineTime } from './outbox';
 import { notifyMessageSent } from './notify';
 
 // Obrolan Siaran Dekat dengan orang yang belum pernah chat. Disimpan di HP (Keystore) karena belum ada percakapan di
@@ -130,7 +131,7 @@ const syncSession = async (session: StrangerSession): Promise<boolean> => {
   for (const message of session.messages.filter(m => m.mine && !m.synced)) {
     // disegel ulang dengan kunci server dan id percakapan asli; client_msg_id sama supaya tidak ganda
     const params = await e2ee.encryptText(conversationId, session.userId, message.text, true, { clientMsgId: message.id });
-    const result = await rpc<SendResult>('seru24_send_message', params);
+    const result = await sendWithOfflineTime(params, message.createdAt);
     if (!result.ok) return false;
     await patchMessage(session.userId, message.id, { synced: true });
     if (result.id && result.code !== 'duplicate') notifyMessageSent(conversationId, result.id);

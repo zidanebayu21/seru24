@@ -23,8 +23,10 @@ export const CallBar = ({ call }: { call: VoiceCall }) => {
         {call.phase === 'incoming' ? <Button label="Terima" onPress={call.accept} /> : null}
         {call.phase === 'incoming' ? <Button label="Tolak" variant="danger" onPress={call.reject} /> : null}
         {call.phase === 'connected' ? <Button label={call.muted ? 'Bunyikan' : 'Bisukan'} variant="plain" onPress={call.toggleMute} /> : null}
+        {call.phase === 'connected' ? <Button label={call.speaker ? 'Earpiece' : 'Speaker'} variant="plain" onPress={call.toggleSpeaker} /> : null}
         {call.phase !== 'incoming' ? <Button label="Akhiri" variant="danger" onPress={call.hangup} /> : null}
       </View>
+      {call.peerRecording ? <Text style={styles.rec}>Lawan bicara sedang merekam panggilan ini</Text> : null}
     </View>
   );
 };
@@ -34,6 +36,7 @@ const styles = themed(() => ({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    flexWrap: 'wrap',
     gap: 8,
     padding: 12,
     borderBottomWidth: 1,
@@ -41,4 +44,5 @@ const styles = themed(() => ({
     backgroundColor: colors.surface,
   },
   note: { textAlign: 'center', paddingVertical: 6 },
+  rec: { flexBasis: '100%', color: colors.danger, fontSize: 12 },
 }));

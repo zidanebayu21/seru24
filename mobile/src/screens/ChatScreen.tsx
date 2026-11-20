@@ -51,6 +51,7 @@ import {
   isIncomingRequest,
   markMessageDeleted,
   mergeCachedMessages,
+  messageTime,
   mergePagedBubbles,
   oldestPersistedSeq,
   peerLabel,
@@ -100,6 +101,8 @@ interface Bubble {
   replyTo: string | null;
   /** Sudah sampai ke HP lawan lewat Siaran Dekat: tampil seperti pesan biasa (jam dan centang), tanpa keterangan khusus. */
   direct?: boolean;
+  /** Dikirim saat offline: waktu kirim direvisi, bubble diberi warna berbeda. */
+  revised?: boolean;
 }
 
 type SendParams = Awaited<ReturnType<typeof e2ee.encryptText>> & { p_attachment_id?: string; p_reply_to?: string | null };
@@ -121,6 +124,7 @@ const queuedAsMessage = (item: QueuedMessage, myId: string | null): ChatMessage 
   recipient_key_version: item.params.p_recipient_key_version,
   reply_to: item.params.p_reply_to ?? null,
   created_at: item.queuedAt,
+  offline_sent_at: item.queuedAt,
   edited_at: null,
   deleted_at: null,
   expires_at: null,
@@ -230,7 +234,8 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
     seq: m.seq,
     mine: m.sender_id === account.me?.id,
     text: await e2ee.decryptText(m, peerId),
-    createdAt: m.created_at,
+    createdAt: messageTime(m),
+    revised: Boolean(m.offline_sent_at),
     deleted: Boolean(m.deleted_at),
     pending: false,
     failed: '',
@@ -566,6 +571,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
   };
 
   const markDelivered = (params: SendParams | QueuedMessage['params'], result: SendResult, notify: boolean) => {
+      const offlineSentAt = result.offline_sent_at ?? null;
       const createdAt = result.created_at ?? new Date().toISOString();
       const seq = result.seq ?? 0;
       const myId = account.me?.id ?? '';
@@ -582,6 +588,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         recipient_key_version: params.p_recipient_key_version,
         reply_to: params.p_reply_to ?? null,
         created_at: createdAt,
+        offline_sent_at: offlineSentAt,
         edited_at: null,
         deleted_at: null,
         expires_at: null,
@@ -593,7 +600,14 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         clearedUpToSeqRef.current,
       );
       if (myId) saveLocalMessages(myId, conversation.id, [cachedMsg]).catch(() => undefined);
-      updateBubble(params.p_client_msg_id, { id: result.id ?? null, seq, createdAt, pending: false, progress: '' });
+      updateBubble(params.p_client_msg_id, {
+        id: result.id ?? null,
+        seq,
+        createdAt: offlineSentAt ?? createdAt,
+        revised: Boolean(offlineSentAt),
+        pending: false,
+        progress: '',
+      });
       if (notify && result.id && result.code !== 'duplicate') {
         notifyMessageSent(conversation.id, result.id);
       }
@@ -1173,6 +1187,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
             style={[
               styles.bubble,
               item.mine ? styles.mine : styles.theirs,
+              item.revised ? styles.revised : null,
               item.failed ? { borderColor: colors.danger, borderWidth: 1.5 } : null,
               flashKey === item.key ? { borderColor: colors.accent, borderWidth: 2 } : null,
               reversedBubbles[index + 1] && reversedBubbles[index + 1]!.mine === item.mine && isSameDay(reversedBubbles[index + 1]!.createdAt, item.createdAt)
@@ -1371,6 +1386,7 @@ const styles = themed(() => ({
   listContent: { padding: 16, gap: 6, flexGrow: 1, justifyContent: 'flex-end' },
   olderLoader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 8 },
   mine: { alignSelf: 'flex-end', backgroundColor: colors.mine, borderBottomRightRadius: 5 },
+  revised: { backgroundColor: colors.revisedBg },
   theirs: { alignSelf: 'flex-start', backgroundColor: colors.surface, borderBottomLeftRadius: 5, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
   quote: { borderLeftWidth: 3, borderLeftColor: colors.accent, backgroundColor: `${colors.accent}22`, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, marginBottom: 4 },
   quoteWho: { color: colors.accent, fontWeight: '700', fontSize: 12 },

@@ -10,6 +10,7 @@ import {
   formatDayLabel,
   isSameDay,
   markMessageDeleted,
+  messageTime,
   mergeCachedMessages,
   mergePagedBubbles,
   oldestPersistedSeq,
@@ -52,6 +53,8 @@ interface Bubble {
   mine: boolean
   text: string | null
   createdAt: string
+  /** Dikirim saat offline (waktu kirim direvisi): bubble diberi warna berbeda. */
+  revised?: boolean
   deleted: boolean
   pending: boolean
   failed: string
@@ -166,6 +169,11 @@ const callPhase = ref<CallPhase>('idle')
 const callMuted = ref(false)
 const callNote = ref('')
 const remoteAudio = ref<HTMLAudioElement | null>(null)
+const { autoRecord, init: initCallSettings } = useCallSettings()
+const recording = ref(false)
+const peerRecording = ref(false)
+let remoteStream: MediaStream | null = null
+let recorder: ReturnType<typeof startCallRecording> | null = null
 let call: ReturnType<typeof createCallController> | null = null
 let callNoteTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -176,6 +184,28 @@ const callTitle = computed(() => {
   return 'Sedang berbicara'
 })
 
+const startRecording = () => {
+  const local = call?.localStream() as MediaStream | null | undefined
+  if (recorder || !local || !remoteStream) return
+  try {
+    recorder = startCallRecording(local, remoteStream, conversation.value?.peer_username ?? '')
+    recording.value = true
+    call?.announceRecording(true)
+  } catch {
+    callNote.value = 'Perekaman tidak didukung di browser ini'
+  }
+}
+
+const stopRecording = () => {
+  if (!recorder) return
+  void recorder.stop()
+  recorder = null
+  recording.value = false
+  call?.announceRecording(false)
+}
+
+onMounted(initCallSettings)
+
 const toggleMute = () => { callMuted.value = call?.setMuted(!callMuted.value) ?? false }
 
 const makeCall = (myId: string) => createCallController({
@@ -183,12 +213,19 @@ const makeCall = (myId: string) => createCallController({
   send: (signal) => presence?.sendCallSignal(signal),
   onPhase: (phase) => {
     callPhase.value = phase
-    if (phase === 'idle') callMuted.value = false
-    else callNote.value = ''
+    if (phase === 'idle') {
+      callMuted.value = false
+      stopRecording()
+    } else {
+      callNote.value = ''
+    }
+    if (phase === 'connected' && autoRecord.value) startRecording()
   },
   onRemoteStream: (stream) => {
-    if (remoteAudio.value) remoteAudio.value.srcObject = stream as MediaStream | null
+    remoteStream = stream as MediaStream | null
+    if (remoteAudio.value) remoteAudio.value.srcObject = remoteStream
   },
+  onPeerRecording: (on) => { peerRecording.value = on },
   onEnd: (reason) => {
     callNote.value = CALL_END_TEXT[reason]
     clearTimeout(callNoteTimer)
@@ -205,7 +242,8 @@ const toBubble = async (m: ChatMessage): Promise<Bubble> => ({
   seq: m.seq,
   mine: m.sender_id === account.me?.id,
   text: await decryptText(m, peerId()),
-  createdAt: m.created_at,
+  createdAt: messageTime(m),
+  revised: Boolean(m.offline_sent_at),
   deleted: Boolean(m.deleted_at),
   pending: false,
   failed: '',
@@ -1041,8 +1079,11 @@ onMounted(() => load().then(() => loadScheduled()).catch(() => { error.value = '
         <button v-if="callPhase === 'incoming'" type="button" @click="call?.accept()">Terima</button>
         <button v-if="callPhase === 'incoming'" type="button" class="ghost" @click="call?.reject()">Tolak</button>
         <button v-if="callPhase === 'connected'" type="button" class="ghost" :aria-pressed="callMuted" @click="toggleMute">{{ callMuted ? 'Bunyikan' : 'Bisukan' }}</button>
+        <button v-if="callPhase === 'connected'" type="button" class="ghost" :aria-pressed="recording" @click="recording ? stopRecording() : startRecording()">{{ recording ? 'Stop rekam' : 'Rekam' }}</button>
         <button v-if="callPhase !== 'incoming'" type="button" class="ghost" @click="call?.hangup()">Akhiri</button>
       </div>
+      <span v-if="recording" class="muted callrec" role="status">Merekam di perangkat ini; lawan bicara diberi tahu</span>
+      <span v-if="peerRecording" class="callrec" role="status">Lawan bicara sedang merekam panggilan ini</span>
     </section>
     <p v-else-if="callNote" class="muted callnote" role="status">{{ callNote }}</p>
     <audio ref="remoteAudio" autoplay playsinline />
@@ -1130,7 +1171,7 @@ onMounted(() => load().then(() => loadScheduled()).catch(() => { error.value = '
       <button v-else-if="hasOlder" type="button" class="older" @click="loadOlder">Muat pesan lama</button>
       <template v-for="(b, i) in bubbles" :key="b.key">
       <div v-if="dayLabelAt(i)" class="day"><span>{{ dayLabelAt(i) }}</span></div>
-      <div class="bubble" :data-key="b.key" :class="{ mine: b.mine, failed: b.failed, tight: isTight(i), flash: flashKey === b.key }">
+      <div class="bubble" :data-key="b.key" :class="{ mine: b.mine, revised: b.revised, failed: b.failed, tight: isTight(i), flash: flashKey === b.key }">
         <div v-if="b.replyTo && !b.deleted" class="quote">
           <strong v-if="quoteOf(b).who">{{ quoteOf(b).who }}</strong>
           <span>{{ quoteOf(b).snippet }}</span>
@@ -1411,6 +1452,7 @@ onMounted(() => load().then(() => loadScheduled()).catch(() => { error.value = '
   align-self: flex-start;
 }
 .bubble.mine { align-self: flex-end; border-radius: 16px 16px 5px 16px; background: var(--mine); box-shadow: 0 1px 1px rgb(0 0 0 / 5%); }
+.bubble.revised { background: var(--revised-bg); }
 .bubble.failed { box-shadow: 0 0 0 1.5px var(--danger); }
 .bubble p { margin: 0; }
 .text { white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -1451,6 +1493,8 @@ onMounted(() => load().then(() => loadScheduled()).catch(() => { error.value = '
 .replying .grow { flex: 1; min-width: 0; margin-bottom: 0; }
 .typing { color: var(--accent); font-style: italic; }
 .callbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 8px 0; }
+.callbar { flex-wrap: wrap; }
+.callrec { flex-basis: 100%; font-size: 12px; }
 .callnote { margin: 6px 0; text-align: center; font-size: 13px; }
 .composer {
   align-items: flex-end;

@@ -45,6 +45,8 @@ onBeforeUnmount(() => {
 })
 
 const theme = useTheme()
+const callSettings = useCallSettings()
+onMounted(callSettings.init)
 const notifyHint = ref('')
 
 const toggleNotifications = async () => {
@@ -97,6 +99,17 @@ const logout = async () => {
         <span class="switch" :class="{ on: notifyState.enabled }" aria-hidden="true" />
       </button>
       <p v-if="notifyHint" class="hint">{{ notifyHint }}</p>
+      <button
+        type="button"
+        role="menuitemcheckbox"
+        class="toggle"
+        :aria-checked="callSettings.autoRecord.value"
+        title="Setiap telepon yang tersambung langsung direkam dan disimpan di perangkat ini; lawan bicara diberi tahu"
+        @click="callSettings.setAutoRecord(!callSettings.autoRecord.value)"
+      >
+        <span>Rekam telepon otomatis</span>
+        <span class="switch" :class="{ on: callSettings.autoRecord.value }" aria-hidden="true" />
+      </button>
       <div class="themes" role="group" aria-label="Tema tampilan">
         <span class="muted">Tema</span>
         <div class="theme-options">

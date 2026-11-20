@@ -55,7 +55,8 @@ describe('mobile outbox', () => {
 
     await flushOutbox();
 
-    expect(mockRpc).toHaveBeenCalledWith('seru24_send_message', dummyItem.params);
+    // waktu kirim asli (saat diantrekan) ikut dikirim agar urutan percakapan tidak bergeser
+    expect(mockRpc).toHaveBeenCalledWith('seru24_send_message', { ...dummyItem.params, p_offline_sent_at: dummyItem.queuedAt });
     expect(sentResult).toBeTruthy();
     expect(sentResult.res.ok).toBe(true);
 
@@ -73,5 +74,21 @@ describe('mobile outbox', () => {
 
     const remaining = await queuedFor('conv-1');
     expect(remaining).toHaveLength(1);
+  });
+});
+
+describe('sendWithOfflineTime', () => {
+  it('mengirim ulang tanpa p_offline_sent_at bila server belum punya parameternya (PGRST202)', async () => {
+    mockRpc.mockRejectedValueOnce({ code: 'PGRST202' }).mockResolvedValueOnce({ ok: true });
+    const { sendWithOfflineTime } = require('../src/lib/outbox');
+    const result = await sendWithOfflineTime({ p_client_msg_id: 'm' }, '2026-11-20T09:00:00.000Z');
+    expect(result.ok).toBe(true);
+    expect(mockRpc).toHaveBeenLastCalledWith('seru24_send_message', { p_client_msg_id: 'm' });
+  });
+
+  it('melempar error lain apa adanya', async () => {
+    mockRpc.mockRejectedValueOnce(new Error('Network disconnected'));
+    const { sendWithOfflineTime } = require('../src/lib/outbox');
+    await expect(sendWithOfflineTime({}, '2026-11-20T09:00:00.000Z')).rejects.toThrow('Network disconnected');
   });
 });

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { randomId } from '../../../web/shared/crypto';
 import { createCallController, type CallEndReason, type CallPhase, type CallSignal } from '../../../web/shared/call-core';
 import { account } from './core';
-import { createMobilePeer, getMobileMic } from './call';
+import { callAudio, createMobilePeer, getMobileMic } from './call';
 
 export const CALL_END_TEXT: Record<CallEndReason, string> = {
   hangup: 'Panggilan selesai',
@@ -21,6 +21,8 @@ export const useVoiceCall = (presenceRef: { current: SignalSender }) => {
   const [phase, setPhase] = useState<CallPhase>('idle');
   const [note, setNote] = useState('');
   const [muted, setMuted] = useState(false);
+  const [speaker, setSpeaker] = useState(false);
+  const [peerRecording, setPeerRecording] = useState(false);
   const controller = useRef<ReturnType<typeof createCallController> | null>(null);
   const noteTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -30,10 +32,18 @@ export const useVoiceCall = (presenceRef: { current: SignalSender }) => {
       send: signal => presenceRef.current?.sendCallSignal(signal),
       onPhase: next => {
         setPhase(next);
-        if (next === 'idle') setMuted(false);
-        else setNote('');
+        if (next === 'idle') {
+          setMuted(false);
+          setSpeaker(false);
+        } else {
+          setNote('');
+        }
+        // mode komunikasi dipasang begitu panggilan benar-benar berjalan dan dilepas saat selesai
+        if (next === 'connecting') callAudio.begin();
+        else if (next === 'idle') callAudio.end();
       },
       onRemoteStream: () => undefined, // react-native-webrtc memutar audio lawan otomatis
+      onPeerRecording: setPeerRecording,
       onEnd: reason => {
         setNote(CALL_END_TEXT[reason]);
         clearTimeout(noteTimer.current);
@@ -55,12 +65,18 @@ export const useVoiceCall = (presenceRef: { current: SignalSender }) => {
     phase,
     note,
     muted,
+    speaker,
+    peerRecording,
     onSignal: useCallback((signal: CallSignal) => { void get().handleSignal(signal); }, [get]),
     start: () => { void get().start(); },
     accept: () => { void get().accept(); },
     reject: () => get().reject(),
     hangup: () => get().hangup(),
     toggleMute: () => setMuted(get().setMuted(!muted)),
+    toggleSpeaker: () => {
+      callAudio.setSpeaker(!speaker);
+      setSpeaker(!speaker);
+    },
   };
 };
 

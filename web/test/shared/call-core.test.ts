@@ -169,3 +169,37 @@ describe('call-core', () => {
     expect(b.log.ends).toEqual(['hangup'])
   })
 })
+
+describe('call-core: rekaman', () => {
+  it('memberi tahu lawan bicara saat merekam dan hanya saat tersambung', async () => {
+    const onPeerRecording = vi.fn()
+    const a = makeSide('alice')
+    const bPeers: FakePeer[] = []
+    const b = createCallController({
+      myId: 'bob',
+      send: (s) => void a.ctl.handleSignal(s),
+      onPhase: () => undefined,
+      onRemoteStream: () => undefined,
+      onEnd: () => undefined,
+      onPeerRecording,
+      newCallId: () => 'call-1',
+      getMic: async () => fakeMic().stream,
+      createPeer: () => { const p = new FakePeer(); bPeers.push(p); return p as unknown as PeerLike },
+    })
+    a.link(b)
+    await a.ctl.start()
+    a.ctl.announceRecording(true)
+    expect(onPeerRecording).not.toHaveBeenCalled()
+    await b.accept()
+    await flush()
+    a.peers[0].connect('connected')
+    bPeers[0].connect('connected')
+    a.ctl.announceRecording(true)
+    expect(onPeerRecording).toHaveBeenLastCalledWith(true)
+    a.ctl.announceRecording(false)
+    expect(onPeerRecording).toHaveBeenLastCalledWith(false)
+    expect(a.ctl.localStream()).not.toBeNull()
+    a.ctl.hangup()
+    expect(a.ctl.localStream()).toBeNull()
+  })
+})

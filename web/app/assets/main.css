@@ -17,6 +17,7 @@
   --theirs: #ffffff;
   --danger: #b42318;
   --warn-bg: #fff4d6;
+  --revised-bg: #ffe0e6;
   --quote-bg: rgb(15 118 110 / 10%);
   color-scheme: light;
 }
@@ -33,6 +34,7 @@
   --theirs: #1f242b;
   --danger: #f97066;
   --warn-bg: #3a2f12;
+  --revised-bg: #4a2830;
   --quote-bg: rgb(45 212 191 / 12%);
   color-scheme: dark;
 }
@@ -49,6 +51,7 @@
   --theirs: #2d231c;
   --danger: #f87171;
   --warn-bg: #3d2d14;
+  --revised-bg: #4d2a28;
   --quote-bg: rgb(200 120 64 / 16%);
   color-scheme: dark;
 }

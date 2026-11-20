@@ -63,6 +63,7 @@ export interface SendResult {
   id?: string
   seq?: number
   created_at?: string
+  offline_sent_at?: string | null
 }
 
 /** Kode penolakan seru24_send_message -> pesan untuk pengguna. */
@@ -127,13 +128,21 @@ export const changedMessages = <T extends { client_msg_id: string; deleted_at?: 
   })
 }
 
+/** Waktu tampil pesan: waktu kirim asli bila dikirim saat offline, selain itu waktu server. */
+export const messageTime = (m: { created_at: string; offline_sent_at?: string | null }): string =>
+  m.offline_sent_at ?? m.created_at
+
 export interface PagedBubble {
   key: string
   seq: number
   pending: boolean
-  /** Waktu pesan; dipakai mengurutkan sesama pesan yang belum punya seq (antrean, Siaran Dekat). */
+  /** Waktu pesan (lihat messageTime); dipakai mengurutkan pesan revisi dan yang belum punya seq (antrean, Siaran Dekat). */
   createdAt?: string
+  /** Pesan dikirim saat offline: waktu kirimnya direvisi, bukan waktu server saat sync. */
+  revised?: boolean
 }
+
+const timeOf = (x: PagedBubble) => Date.parse(x.createdAt ?? '') || 0
 
 /** seq terkecil dari pesan yang sudah tersimpan di server (untuk p_before_seq paginasi). */
 export const oldestPersistedSeq = (items: readonly PagedBubble[]): number | null => {
@@ -151,8 +160,14 @@ export const oldestPersistedSeq = (items: readonly PagedBubble[]): number | null
  */
 export const compareBubbles = (a: PagedBubble, b: PagedBubble): number => {
   const rank = (x: PagedBubble) => (x.pending || x.seq <= 0 ? Infinity : x.seq)
-  if (rank(a) !== rank(b)) return rank(a) - rank(b)
-  return rank(a) === Infinity ? (a.createdAt ?? '').localeCompare(b.createdAt ?? '') : 0
+  if (rank(a) === Infinity || rank(b) === Infinity) {
+    if (rank(a) !== rank(b)) return rank(a) === Infinity ? 1 : -1
+    return timeOf(a) - timeOf(b)
+  }
+  // pesan revisi (dikirim saat offline) ditempatkan menurut waktu kirim aslinya, bukan seq saat baru sync ke server;
+  // pesan biasa tetap menurut seq (waktu server selalu naik bersama seq)
+  if ((a.revised || b.revised) && timeOf(a) !== timeOf(b)) return timeOf(a) - timeOf(b)
+  return rank(a) - rank(b)
 }
 
 export const mergePagedBubbles = <T extends PagedBubble>(incoming: readonly T[], current: readonly T[]): T[] => {

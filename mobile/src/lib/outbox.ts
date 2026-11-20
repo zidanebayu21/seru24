@@ -19,6 +19,19 @@ export interface QueuedMessage {
   queuedAt: string;
 }
 
+/**
+ * Kirim pesan beserta waktu kirim aslinya (offline_sent_at) supaya urutan percakapan tidak bergeser saat sync.
+ * Bila server belum punya parameter itu (migrasi belum dijalankan), kirim tanpanya agar pesan tidak tertahan.
+ */
+export const sendWithOfflineTime = async (params: Record<string, unknown>, offlineSentAt: string): Promise<SendResult> => {
+  try {
+    return await rpc<SendResult>('seru24_send_message', { ...params, p_offline_sent_at: offlineSentAt });
+  } catch (error) {
+    if ((error as { code?: string } | null)?.code !== 'PGRST202') throw error;
+    return rpc<SendResult>('seru24_send_message', params);
+  }
+};
+
 type SentListener = (item: QueuedMessage, result: SendResult) => void;
 
 const listeners = new Set<SentListener>();
@@ -72,7 +85,7 @@ export const flushOutbox = (): Promise<void> => {
       const [item] = items;
       let result: SendResult;
       try {
-        result = await rpc<SendResult>('seru24_send_message', item!.params);
+        result = await sendWithOfflineTime(item!.params, item!.queuedAt);
       } catch {
         // gangguan jaringan, atau sesi belum pulih setelah lama offline: pesan tetap di antrean dan dicoba lagi.
         // Hanya penolakan eksplisit server (result.ok = false) yang membuang pesan.

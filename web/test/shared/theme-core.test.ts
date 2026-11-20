@@ -15,6 +15,7 @@ const CSS_VARS: Record<keyof Palette, string> = {
   mine: '--mine',
   danger: '--danger',
   warnBg: '--warn-bg',
+  revisedBg: '--revised-bg',
 }
 
 /** Isi blok CSS `:root[data-theme="<name>"] { ... }`. */

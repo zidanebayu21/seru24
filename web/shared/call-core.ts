@@ -35,11 +35,13 @@ export type CallPhase = 'idle' | 'calling' | 'incoming' | 'connecting' | 'connec
 export type CallEndReason = 'hangup' | 'rejected' | 'busy' | 'timeout' | 'failed' | 'mic-denied'
 
 export interface CallSignal {
-  type: 'invite' | 'accept' | 'reject' | 'busy' | 'offer' | 'answer' | 'ice' | 'hangup'
+  type: 'invite' | 'accept' | 'reject' | 'busy' | 'offer' | 'answer' | 'ice' | 'hangup' | 'record'
   callId: string
   from: string
   sdp?: string
   candidate?: IceCandidate
+  /** Untuk type 'record': true saat pihak pengirim mulai merekam panggilan (secara lokal), false saat berhenti. */
+  on?: boolean
 }
 
 export interface CallDeps {
@@ -48,6 +50,8 @@ export interface CallDeps {
   onPhase: (phase: CallPhase) => void
   onRemoteStream: (stream: MicStream | null) => void
   onEnd: (reason: CallEndReason) => void
+  /** Lawan bicara mulai/berhenti merekam panggilan di perangkatnya; pengguna wajib diberi tahu. */
+  onPeerRecording?: (on: boolean) => void
   newCallId: () => string
   iceServers?: IceServer[]
   getMic?: () => Promise<MicStream>
@@ -91,6 +95,7 @@ export const createCallController = (deps: CallDeps) => {
     const wasActive = phase !== 'idle'
     callId = ''
     deps.onRemoteStream(null)
+    deps.onPeerRecording?.(false)
     setPhase('idle')
     if (wasActive) deps.onEnd(reason)
   }
@@ -233,6 +238,7 @@ export const createCallController = (deps: CallDeps) => {
         case 'reject': return teardown('rejected')
         case 'busy': return teardown('busy')
         case 'hangup': return teardown('hangup')
+        case 'record': return deps.onPeerRecording?.(signal.on === true)
       }
     } catch {
       emit('hangup')
@@ -246,5 +252,15 @@ export const createCallController = (deps: CallDeps) => {
     return muted
   }
 
-  return { start, accept, reject, hangup, handleSignal, setMuted, phase: () => phase }
+  /** Beri tahu lawan bicara bahwa panggilan ini direkam (atau berhenti direkam) di perangkat kita. */
+  const announceRecording = (on: boolean) => {
+    if (phase === 'connected') emit('record', { on })
+  }
+
+  return {
+    start, accept, reject, hangup, handleSignal, setMuted, announceRecording,
+    phase: () => phase,
+    /** Suara mikrofon lokal; null bila panggilan belum/tidak aktif. */
+    localStream: () => mic,
+  }
 }

@@ -15,6 +15,8 @@ export interface Palette {
   mine: string
   danger: string
   warnBg: string
+  /** Latar bubble pesan yang dikirim saat offline (waktu kirim direvisi). */
+  revisedBg: string
 }
 
 export const PALETTES: Record<ThemeName, Palette> = {
@@ -29,6 +31,7 @@ export const PALETTES: Record<ThemeName, Palette> = {
     mine: '#d9f2ee',
     danger: '#b42318',
     warnBg: '#fff4d6',
+    revisedBg: '#ffe0e6',
   },
   dark: {
     bg: '#0f1215',
@@ -41,6 +44,7 @@ export const PALETTES: Record<ThemeName, Palette> = {
     mine: '#123a35',
     danger: '#f97066',
     warnBg: '#3a2f12',
+    revisedBg: '#4a2830',
   },
   // coklat tua hangat dengan aksen tembaga, mengikuti tampilan scaner_sca_sast
   brown: {
@@ -54,6 +58,7 @@ export const PALETTES: Record<ThemeName, Palette> = {
     mine: '#4a2e1c',
     danger: '#f87171',
     warnBg: '#3d2d14',
+    revisedBg: '#4d2a28',
   },
 }
 

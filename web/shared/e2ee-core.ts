@@ -29,6 +29,8 @@ export interface ChatMessage {
   recipient_key_version: number
   reply_to: string | null
   created_at: string
+  /** Waktu kirim asli bila pesan dikirim saat offline; tampilan memakai ini sebagai pengganti created_at. */
+  offline_sent_at?: string | null
   edited_at: string | null
   deleted_at: string | null
   expires_at: string | null

@@ -6,6 +6,7 @@ import {
   bubbleStatus,
   compareBubbles,
   markMessageDeleted,
+  messageTime,
   mergeCachedMessages,
   mergePagedBubbles,
   oldestPersistedSeq,
@@ -122,5 +123,29 @@ describe('paginasi pesan', () => {
     expect(replySnippet({ text: 'x'.repeat(100), deleted: false })).toHaveLength(81)
     expect(replySnippet({ text: 'rahasia', deleted: true })).toBe('Pesan dihapus')
     expect(replySnippet(null)).toBe('Pesan sebelumnya')
+  })
+})
+
+describe('pesan revisi (dikirim saat offline)', () => {
+  const at = (iso: string) => iso
+  it('messageTime memakai waktu kirim offline bila ada', () => {
+    expect(messageTime({ created_at: at('2026-11-20T10:05:00Z'), offline_sent_at: at('2026-11-20T09:00:00Z') })).toBe('2026-11-20T09:00:00Z')
+    expect(messageTime({ created_at: at('2026-11-20T10:05:00Z'), offline_sent_at: null })).toBe('2026-11-20T10:05:00Z')
+  })
+
+  it('pesan revisi tampil menurut waktu kirim aslinya, bukan seq saat sync', () => {
+    const lama = { key: 'a', seq: 1, pending: false, createdAt: '2026-11-20T09:00:00Z' }
+    const lawan = { key: 'b', seq: 2, pending: false, createdAt: '2026-11-20T09:30:00Z' }
+    // dikirim 09:10 saat offline, baru masuk server (seq 3) pukul 10:00
+    const revisi = { key: 'c', seq: 3, pending: false, createdAt: '2026-11-20T09:10:00Z', revised: true }
+    const baru = { key: 'd', seq: 4, pending: false, createdAt: '2026-11-20T10:01:00Z' }
+    expect([baru, revisi, lawan, lama].sort(compareBubbles).map((b) => b.key)).toEqual(['a', 'c', 'b', 'd'])
+  })
+
+  it('pesan biasa tetap urut seq dan yang belum tersimpan tetap paling bawah', () => {
+    const a = { key: 'a', seq: 5, pending: false, createdAt: '2026-11-20T09:00:00.000000+00:00' }
+    const b = { key: 'b', seq: 6, pending: false, createdAt: '2026-11-20T09:00:00.000000+00:00' }
+    const antre = { key: 'q', seq: 0, pending: true, createdAt: '2026-11-20T08:00:00Z' }
+    expect([antre, b, a].sort(compareBubbles).map((x) => x.key)).toEqual(['a', 'b', 'q'])
   })
 })
