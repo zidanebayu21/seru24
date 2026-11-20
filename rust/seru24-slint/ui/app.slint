@@ -1,0 +1,181 @@
+import { ListView, LineEdit, Button } from "std-widgets.slint";
+
+export struct ChatItem {
+    name: string,
+    initial: string,
+    last: string,
+    time: string,
+    unread: int,
+}
+
+export struct Bubble {
+    text: string,
+    time: string,
+    mine: bool,
+    // dikirim saat offline: waktu kirim direvisi (warna pink seperti di aplikasi)
+    revised: bool,
+}
+
+component ChatRow inherits Rectangle {
+    in property <ChatItem> item;
+    callback clicked;
+    height: 64px;
+    background: touch.has-hover ? #00000010 : transparent;
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 12px;
+        Rectangle {
+            width: 44px;
+            height: 44px;
+            border-radius: 22px;
+            background: #0f766e;
+            Text {
+                text: root.item.initial;
+                color: white;
+                font-weight: 700;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            Text {
+                text: root.item.name;
+                font-weight: 700;
+                overflow: elide;
+            }
+            Text {
+                text: root.item.last;
+                color: #646b75;
+                font-size: 13px;
+                overflow: elide;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 4px;
+            Text {
+                text: root.item.time;
+                color: #646b75;
+                font-size: 12px;
+                horizontal-alignment: right;
+            }
+            if root.item.unread > 0: Rectangle {
+                height: 20px;
+                width: 20px;
+                border-radius: 10px;
+                background: #0f766e;
+                Text {
+                    text: root.item.unread;
+                    color: white;
+                    font-size: 11px;
+                }
+            }
+        }
+    }
+}
+
+component BubbleRow inherits HorizontalLayout {
+    in property <Bubble> bubble;
+    padding-left: 12px;
+    padding-right: 12px;
+    padding-top: 3px;
+    padding-bottom: 3px;
+    if root.bubble.mine: Rectangle { horizontal-stretch: 1; }
+    Rectangle {
+        max-width: 280px;
+        border-radius: 16px;
+        background: root.bubble.revised ? #ffe0e6 : (root.bubble.mine ? #d9f2ee : #ffffff);
+        VerticalLayout {
+            padding: 10px;
+            spacing: 2px;
+            Text {
+                text: root.bubble.text;
+                wrap: word-wrap;
+            }
+            Text {
+                text: root.bubble.time;
+                color: #646b75;
+                font-size: 11px;
+                horizontal-alignment: right;
+            }
+        }
+    }
+    if !root.bubble.mine: Rectangle { horizontal-stretch: 1; }
+}
+
+export component AppWindow inherits Window {
+    title: "seru24 (prototipe Slint)";
+    preferred-width: 400px;
+    preferred-height: 760px;
+    background: #f4f5f7;
+
+    in property <[ChatItem]> chats;
+    in property <[Bubble]> bubbles;
+    in-out property <int> open-chat: -1;
+    in-out property <string> draft;
+    callback open(int);
+    callback back();
+    callback send(string);
+
+    if root.open-chat < 0: VerticalLayout {
+        Rectangle {
+            height: 56px;
+            background: #ffffff;
+            Text {
+                text: "seru24";
+                font-size: 20px;
+                font-weight: 700;
+                color: #0f766e;
+            }
+        }
+        ListView {
+            for chat[index] in root.chats: ChatRow {
+                item: chat;
+                clicked => { root.open(index); }
+            }
+        }
+    }
+    if root.open-chat >= 0: VerticalLayout {
+        Rectangle {
+            height: 56px;
+            background: #ffffff;
+            HorizontalLayout {
+                padding: 8px;
+                spacing: 8px;
+                Button {
+                    text: "<";
+                    clicked => { root.back(); }
+                }
+                Text {
+                    text: root.chats[root.open-chat].name;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+            }
+        }
+        ListView {
+            for bubble in root.bubbles: BubbleRow { bubble: bubble; }
+        }
+        Rectangle {
+            height: 56px;
+            background: #ffffff;
+            HorizontalLayout {
+                padding: 8px;
+                spacing: 8px;
+                input := LineEdit {
+                    placeholder-text: "Tulis pesan";
+                    text <=> root.draft;
+                    accepted => { root.send(self.text); }
+                }
+                Button {
+                    text: "Kirim";
+                    primary: true;
+                    clicked => { root.send(input.text); }
+                }
+            }
+        }
+    }
+}

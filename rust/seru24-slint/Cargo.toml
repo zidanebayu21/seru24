@@ -1,0 +1,18 @@
+[package]
+name = "seru24-slint"
+version = "0.1.0"
+edition = "2021"
+description = "Prototipe UI seru24 dengan Slint: daftar chat dan layar percakapan (data tiruan) untuk mengukur RAM dan ukuran."
+
+[dependencies]
+slint = "1"
+
+[build-dependencies]
+slint-build = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
