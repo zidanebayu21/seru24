@@ -15,7 +15,7 @@ Dokumen untuk agent pelaksana (Antigravity/"agy"). Baca SELURUHNYA sebelum menul
 
 ## 1. Status dan kejujuran soal manfaat
 
-- Sudah ada prototipe `rust/seru24-slint/` (desktop, data tiruan): exe 9,2 MB, RAM ±126 MB working set di Windows. **Itu bukan angka Android** dan belum dibandingkan dengan RN. Jangan menjanjikan penghematan RAM sebelum diukur (Fase 0).
+- Prototipe desktop Slint (data tiruan, sudah dihapus dari repo, ada di riwayat git `dev-rust`) terukur: exe 9,2 MB, RAM ±126 MB working set di Windows. **Itu bukan angka Android** dan belum dibandingkan dengan RN. Jangan menjanjikan penghematan RAM sebelum diukur (Fase 0).
 - Risiko terbesar bukan performa, tapi: IME/keyboard & emoji di Slint Android, aksesibilitas, push FCM, Nearby Connections, WebRTC, dan lisensi Slint.
 - **Lisensi Slint**: GPLv3 (wajib membuka kode aplikasi), atau "Royalty-free" (wajib menampilkan badge/atribusi Slint dan daftar), atau komersial berbayar. Pemilik harus memilih sebelum rilis publik. Catat pilihan di README.
 
@@ -49,10 +49,10 @@ Backend (Supabase URL, anon key, `API_BASE_URL=https://seru24.vercel.app`) tidak
 
 ## 3. Arsitektur target
 
-Satu crate **workspace** di `rust/`:
+Satu **workspace** di folder baru `mobile-rust/` (folder `mobile/` TIDAK diubah):
 
 ```
-rust/
+mobile-rust/
   Cargo.toml                 # workspace
   seru24-core/               # lib murni, TANPA UI, bisa di-test di desktop
     src/crypto.rs            # port crypto.ts
@@ -64,7 +64,6 @@ rust/
   seru24-app/                # UI Slint + android_main
     ui/*.slint
     src/lib.rs               # #[no_mangle] android_main + main desktop
-  seru24-slint/              # prototipe lama (boleh dihapus setelah Fase 1)
 ```
 
 Prinsip: seluruh logika di `seru24-core` (test di PC, cepat). `seru24-app` hanya merangkai UI. Async: `tokio` (runtime kecil `rt` + `net`), UI thread tetap Slint; hasil dikirim balik lewat `slint::invoke_from_event_loop` / `Weak`.
@@ -100,7 +99,7 @@ Penting soal ABI:
 ## 5. Fase kerja
 
 ### Fase 0 — Ukur & gerbang (WAJIB dulu)
-1. Jadikan prototipe `rust/seru24-slint` dapat dibangun ke Android (Bagian 6) dan jalankan di emulator **dan** HP asli.
+1. Buat prototipe kecil di `mobile-rust/seru24-app` (daftar chat + layar percakapan data tiruan, bubble pink) yang dapat dibangun ke Android (Bagian 6) dan jalankan di emulator **dan** HP asli.
 2. Ukur RAM (Bagian 7) prototipe vs APK RN rilis 1.25 (pasang keduanya, kondisi sama: daftar chat terbuka, idle 30 dtk).
 3. Uji manual: ketik di LineEdit (keyboard muncul? IME Indonesia? emoji? tempel/seleksi teks? scroll 500 pesan halus?).
 - **Gerbang 0**: lanjut hanya jika (a) keyboard + emoji + seleksi teks berfungsi, (b) RAM/APK tidak lebih buruk dari RN, (c) pemilik setuju pilihan lisensi. Jika gagal, **berhenti dan laporkan** angkanya; jangan lanjut memaksakan.
@@ -109,7 +108,7 @@ Penting soal ABI:
 Port `crypto.ts` + `e2ee-core.ts` ke Rust. **Kompatibilitas byte-per-byte dengan TS adalah syarat mutlak**, karena pesan lama dan pengguna web harus tetap bisa saling baca.
 
 5.1 Vektor silang (cara anti-salah):
-1. Buat skrip Node kecil (di `rust/seru24-core/tests/gen_vectors.mjs`, TIDAK mengubah `web/`) yang mengimpor `web/shared/crypto.ts` (lewat `tsx`) dan mencetak JSON: untuk input tetap (password, salt, conversationId, kunci privat tetap, nonce tetap bila fungsi mengizinkan) → `authSecret`, `wrapKey`, kunci percakapan, ciphertext, nonce, safetyCode.
+1. Buat skrip Node kecil (di `mobile-rust/seru24-core/tests/gen_vectors.mjs`, TIDAK mengubah `web/`) yang mengimpor `web/shared/crypto.ts` (lewat `tsx`) dan mencetak JSON: untuk input tetap (password, salt, conversationId, kunci privat tetap, nonce tetap bila fungsi mengizinkan) → `authSecret`, `wrapKey`, kunci percakapan, ciphertext, nonce, safetyCode.
 2. Simpan JSON ke `tests/vectors.json` (data uji, bukan rahasia asli — pakai nilai karangan).
 3. Test Rust memuat JSON dan menegaskan hasil **identik**; juga uji arah sebaliknya: Rust mengenkripsi → Node mendekripsi (jalankan skrip Node kedua).
 4. Perhatikan detail yang sering salah: varian base64 (`toBase64` vs `toBase64Url`), normalisasi `password.normalize('NFKC')`, `salt = conversation_id` untuk HKDF, string `info` (`seru24/v1/msg`, `seru24/v1/auth`, `seru24/v1/keywrap`), AAD (`seru24/v1/backup`, dan AAD konteks pesan = conversationId/senderId/clientMsgId/kind — baca `MessageContext` di `crypto.ts` untuk urutan/format pastinya), nonce 12 byte, `MAX_TEXT_LENGTH = 4000`, scrypt `N=2^15, r=8, p=1`.
@@ -131,7 +130,7 @@ Urutan layar (satu per satu, tiap layar dites di emulator):
 3. `ChatScreen` (bubble, balasan, hapus, baca/centang, **bubble revisi pink**, kirim, kirim terjadwal, lampiran).
 4. Tema (terang/gelap/cokelat dari `theme-core.ts`; tetapkan token warna sebagai `global` Slint, jangan hardcode berulang → hindari duplikasi).
 5. Akun/menu, backup kunci, perangkat tepercaya.
-Gunakan komponen Slint bersama (`component` + `global Theme`), virtualisasi lewat `ListView`. Prototipe `ui/app.slint` adalah titik awal.
+Gunakan komponen Slint bersama (`component` + `global Theme`), virtualisasi lewat `ListView`. Mulai dari prototipe Fase 0.
 
 ### Fase 4 — Fitur platform (butuh JNI / Kotlin)
 - **Push FCM**: FCM tidak bisa dari Rust murni. Pertahankan Java/Kotlin `FirebaseMessagingService` kecil yang meneruskan token/payload ke Rust lewat JNI; registrasi token via `seru24_register_push_token`. Lihat `mobile/src/lib/notify.ts` dan `web/server/api/push`.
@@ -197,7 +196,7 @@ Pakai angka **TOTAL PSS** (KB) sesudah idle 30 detik di daftar chat; ulangi 3 ka
 
 Cara yang biasa dipakai pemilik di repo ini (aplikasi RN, sebagai pembanding dan contoh alur):
 - `mobile\build.ps1 -Emulator` membangun APK **x86_64** tanpa menaikkan versi, hasilnya `mobile\seru24-<versi>-emulator.apk` (sudah banyak contoh di folder `mobile\`, mis. `seru24-21-emulator.apk`). Tanpa `-Emulator` skrip itu **menaikkan versi** dan membangun arm64 untuk HP asli, jadi **jangan dijalankan tanpa `-Emulator` kecuali pemilik minta rilis**.
-- Alurnya: build APK emulator → jalankan AVD → `adb install -r <apk>` → buka aplikasi → baca `adb logcat`. Ikuti pola yang sama untuk APK Rust: sediakan skrip `rust\build.ps1 -Emulator` (target `x86_64-linux-android`, tanpa menaikkan versi) dan tanpa `-Emulator` (target `aarch64-linux-android`), meniru `mobile\build.ps1` (set `ANDROID_HOME`, batas ukuran APK 20 MB, nama berkas `seru24-rust-<versi>[-emulator].apk`).
+- Alurnya: build APK emulator → jalankan AVD → `adb install -r <apk>` → buka aplikasi → baca `adb logcat`. Ikuti pola yang sama untuk APK Rust: sediakan skrip `mobile-rust\build.ps1 -Emulator` (target `x86_64-linux-android`, tanpa menaikkan versi) dan tanpa `-Emulator` (target `aarch64-linux-android`), meniru `mobile\build.ps1` (set `ANDROID_HOME`, batas ukuran APK 20 MB, nama berkas `seru24-rust-<versi>[-emulator].apk`).
 - Untuk membandingkan RAM, pasang APK RN emulator (`mobile\seru24-25-emulator.apk` bila ada, atau bangun dengan `-Emulator`) berdampingan dengan APK Rust di emulator yang sama, supaya kondisinya setara.
 - Rilis ke pengguna tetap hanya lewat `release_apk.ps1` atas perintah pemilik.
 
@@ -244,4 +243,4 @@ Pengguna lama harus tetap bisa membaca pesan lama (kompatibilitas kripto sudah d
 
 ## 11. Definition of done tiap fase
 
-Kode dirapikan (`cargo fmt`, `clippy -D warnings`), tes lulus, tidak ada duplikasi/impor tak terpakai, README `rust/` diperbarui (cara build, cara jalankan emulator, hasil ukur), lalu **berhenti dan laporkan ke pemilik** sebelum fase berikutnya. Commit hanya atas permintaan.
+Kode dirapikan (`cargo fmt`, `clippy -D warnings`), tes lulus, tidak ada duplikasi/impor tak terpakai, README `mobile-rust/` diperbarui (cara build, cara jalankan emulator, hasil ukur), lalu **berhenti dan laporkan ke pemilik** sebelum fase berikutnya. Commit hanya atas permintaan.
