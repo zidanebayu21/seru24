@@ -11,7 +11,12 @@ export interface IceCandidate { candidate?: string; sdpMid?: string | null; sdpM
 interface SessionDescription { type: 'offer' | 'answer'; sdp?: string }
 export interface MicTrack { enabled: boolean; stop: () => void }
 export interface MicStream { getTracks: () => MicTrack[]; getAudioTracks: () => MicTrack[] }
+interface SenderLike {
+  getParameters: () => { encodings?: { maxBitrate?: number }[] }
+  setParameters: (parameters: { encodings?: { maxBitrate?: number }[] }) => Promise<unknown>
+}
 export interface PeerLike {
+  getSenders?: () => SenderLike[]
   connectionState: string
   signalingState: string
   remoteDescription: unknown
@@ -53,6 +58,8 @@ export interface CallDeps {
   /** Lawan bicara mulai/berhenti merekam panggilan di perangkatnya; pengguna wajib diberi tahu. */
   onPeerRecording?: (on: boolean) => void
   newCallId: () => string
+  /** Batas bitrate suara yang kita kirim (bit/detik), dibaca saat panggilan tersambung; kosong = bawaan WebRTC. */
+  getBitrate?: () => number | undefined
   iceServers?: IceServer[]
   getMic?: () => Promise<MicStream>
   createPeer?: (config: { iceServers: IceServer[] }) => PeerLike
@@ -118,9 +125,21 @@ export const createCallController = (deps: CallDeps) => {
     }
   }
 
+  const applyBitrate = async () => {
+    const bitrate = deps.getBitrate?.()
+    if (!bitrate || !pc?.getSenders) return
+    for (const sender of pc.getSenders()) {
+      const parameters = sender.getParameters()
+      parameters.encodings = parameters.encodings?.length ? parameters.encodings : [{}]
+      parameters.encodings[0]!.maxBitrate = bitrate
+      await sender.setParameters(parameters).catch(() => undefined)
+    }
+  }
+
   const buildPeer = () => {
     pc = createPeer({ iceServers: deps.iceServers ?? DEFAULT_ICE_SERVERS })
     mic?.getTracks().forEach((track) => pc!.addTrack(track, mic!))
+    void applyBitrate()
     pc.onicecandidate = ({ candidate }) => {
       if (candidate) emit('ice', { candidate: candidate.toJSON() })
     }
@@ -130,6 +149,7 @@ export const createCallController = (deps: CallDeps) => {
       if (pc.connectionState === 'connected') {
         clearTimeout(ringTimer)
         setPhase('connected')
+        void applyBitrate()
       } else if (pc.connectionState === 'failed') {
         emit('hangup')
         teardown('failed')

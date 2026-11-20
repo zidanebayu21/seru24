@@ -20,6 +20,7 @@ import {
 import { MAX_PINS, addPin, canPin, parsePins, pinsNewestFirst, pinsStorageKey, prunePins, removePin } from '#shared/pin-core'
 import { createConversationPresence, type PeerPresence } from '#shared/presence-core'
 import { createCallController, type CallEndReason, type CallPhase } from '#shared/call-core'
+import { CALL_QUALITIES, callQualityKey, callQualityOption, parseCallQuality, type CallQuality } from '#shared/call-quality-core'
 import { searchMessages } from '#shared/search-core'
 import {
   SCHEDULE_ERRORS,
@@ -170,10 +171,26 @@ const callMuted = ref(false)
 const callNote = ref('')
 const remoteAudio = ref<HTMLAudioElement | null>(null)
 const { autoRecord, init: initCallSettings } = useCallSettings()
-const recording = ref(false)
+// kualitas suara telepon dipilih per percakapan (disimpan di perangkat ini)
+const callQuality = ref<CallQuality>('standar')
+const loadCallQuality = () => {
+  try {
+    callQuality.value = parseCallQuality(localStorage.getItem(callQualityKey(conversationId)))
+  } catch {
+    // storage diblokir: tetap bawaan
+  }
+}
+watch(callQuality, (value) => {
+  try {
+    localStorage.setItem(callQualityKey(conversationId), value)
+  } catch {
+    // mode privat: berlaku selama halaman terbuka
+  }
+})
+const callRecording = ref(false)
 const peerRecording = ref(false)
 let remoteStream: MediaStream | null = null
-let recorder: ReturnType<typeof startCallRecording> | null = null
+let callRecorder: ReturnType<typeof startCallRecording> | null = null
 let call: ReturnType<typeof createCallController> | null = null
 let callNoteTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -184,27 +201,30 @@ const callTitle = computed(() => {
   return 'Sedang berbicara'
 })
 
-const startRecording = () => {
+const startCallRec = () => {
   const local = call?.localStream() as MediaStream | null | undefined
-  if (recorder || !local || !remoteStream) return
+  if (callRecorder || !local || !remoteStream) return
   try {
-    recorder = startCallRecording(local, remoteStream, conversation.value?.peer_username ?? '')
-    recording.value = true
+    callRecorder = startCallRecording(local, remoteStream, conversation.value?.peer_username ?? '')
+    callRecording.value = true
     call?.announceRecording(true)
   } catch {
     callNote.value = 'Perekaman tidak didukung di browser ini'
   }
 }
 
-const stopRecording = () => {
-  if (!recorder) return
-  void recorder.stop()
-  recorder = null
-  recording.value = false
+const stopCallRec = () => {
+  if (!callRecorder) return
+  void callRecorder.stop()
+  callRecorder = null
+  callRecording.value = false
   call?.announceRecording(false)
 }
 
-onMounted(initCallSettings)
+onMounted(() => {
+  initCallSettings()
+  loadCallQuality()
+})
 
 const toggleMute = () => { callMuted.value = call?.setMuted(!callMuted.value) ?? false }
 
@@ -215,11 +235,11 @@ const makeCall = (myId: string) => createCallController({
     callPhase.value = phase
     if (phase === 'idle') {
       callMuted.value = false
-      stopRecording()
+      stopCallRec()
     } else {
       callNote.value = ''
     }
-    if (phase === 'connected' && autoRecord.value) startRecording()
+    if (phase === 'connected' && autoRecord.value) startCallRec()
   },
   onRemoteStream: (stream) => {
     remoteStream = stream as MediaStream | null
@@ -232,6 +252,7 @@ const makeCall = (myId: string) => createCallController({
     callNoteTimer = setTimeout(() => { callNote.value = '' }, CALL_NOTE_MS)
   },
   newCallId: randomId,
+  getBitrate: () => callQualityOption(callQuality.value).bitrate,
 })
 
 const peerId = () => conversation.value?.peer_id ?? ''
@@ -1067,6 +1088,9 @@ onMounted(() => load().then(() => loadScheduled()).catch(() => { error.value = '
       >
         <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z" /></svg>
       </button>
+      <select v-model="callQuality" class="callq" aria-label="Kualitas suara telepon di percakapan ini" title="Kualitas suara telepon (suara yang Anda kirim)" :disabled="callPhase !== 'idle'">
+        <option v-for="option in CALL_QUALITIES" :key="option.value" :value="option.value">{{ option.label }}</option>
+      </select>
       <button type="button" class="ghost icon" aria-label="Cari pesan" title="Cari pesan" :aria-expanded="searchOpen" @click="searchOpen ? closeSearch() : openSearch()">
         <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5" /><path d="M16 16l4.5 4.5" /></svg>
       </button>
@@ -1079,10 +1103,10 @@ onMounted(() => load().then(() => loadScheduled()).catch(() => { error.value = '
         <button v-if="callPhase === 'incoming'" type="button" @click="call?.accept()">Terima</button>
         <button v-if="callPhase === 'incoming'" type="button" class="ghost" @click="call?.reject()">Tolak</button>
         <button v-if="callPhase === 'connected'" type="button" class="ghost" :aria-pressed="callMuted" @click="toggleMute">{{ callMuted ? 'Bunyikan' : 'Bisukan' }}</button>
-        <button v-if="callPhase === 'connected'" type="button" class="ghost" :aria-pressed="recording" @click="recording ? stopRecording() : startRecording()">{{ recording ? 'Stop rekam' : 'Rekam' }}</button>
+        <button v-if="callPhase === 'connected'" type="button" class="ghost" :aria-pressed="callRecording" @click="callRecording ? stopCallRec() : startCallRec()">{{ callRecording ? 'Stop rekam' : 'Rekam' }}</button>
         <button v-if="callPhase !== 'incoming'" type="button" class="ghost" @click="call?.hangup()">Akhiri</button>
       </div>
-      <span v-if="recording" class="muted callrec" role="status">Merekam di perangkat ini; lawan bicara diberi tahu</span>
+      <span v-if="callRecording" class="muted callrec" role="status">Merekam di perangkat ini; lawan bicara diberi tahu</span>
       <span v-if="peerRecording" class="callrec" role="status">Lawan bicara sedang merekam panggilan ini</span>
     </section>
     <p v-else-if="callNote" class="muted callnote" role="status">{{ callNote }}</p>
@@ -1493,6 +1517,7 @@ onMounted(() => load().then(() => loadScheduled()).catch(() => { error.value = '
 .replying .grow { flex: 1; min-width: 0; margin-bottom: 0; }
 .typing { color: var(--accent); font-style: italic; }
 .callbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 8px 0; }
+.callq { max-width: 150px; min-height: 34px; padding: 4px 8px; font-size: 12px; }
 .callbar { flex-wrap: wrap; }
 .callrec { flex-basis: 100%; font-size: 12px; }
 .callnote { margin: 6px 0; text-align: center; font-size: 13px; }

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { randomId } from '../../../web/shared/crypto';
 import { createCallController, type CallEndReason, type CallPhase, type CallSignal } from '../../../web/shared/call-core';
-import { account } from './core';
+import { callQualityOption, nextCallQuality, parseCallQuality, type CallQuality } from '../../../web/shared/call-quality-core';
+import { account, readSetting, writeSetting } from './core';
 import { callAudio, createMobilePeer, getMobileMic } from './call';
 
 export const CALL_END_TEXT: Record<CallEndReason, string> = {
@@ -17,12 +18,16 @@ const CALL_NOTE_MS = 5000;
 type SignalSender = { sendCallSignal: (signal: CallSignal) => void } | null;
 
 /** Telepon suara untuk satu percakapan; sinyal lewat presence (channel conv:<id>) yang dibuka layar chat. */
-export const useVoiceCall = (presenceRef: { current: SignalSender }) => {
+export const useVoiceCall = (presenceRef: { current: SignalSender }, conversationId: string) => {
   const [phase, setPhase] = useState<CallPhase>('idle');
   const [note, setNote] = useState('');
   const [muted, setMuted] = useState(false);
   const [speaker, setSpeaker] = useState(false);
   const [peerRecording, setPeerRecording] = useState(false);
+  // kualitas suara dipilih per percakapan; dibaca controller lewat ref saat panggilan tersambung
+  const [quality, setQuality] = useState<CallQuality>('standar');
+  const qualityRef = useRef<CallQuality>('standar');
+  const settingName = `call-quality.${conversationId}`;
   const controller = useRef<ReturnType<typeof createCallController> | null>(null);
   const noteTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -50,11 +55,24 @@ export const useVoiceCall = (presenceRef: { current: SignalSender }) => {
         noteTimer.current = setTimeout(() => setNote(''), CALL_NOTE_MS);
       },
       newCallId: randomId,
+      getBitrate: () => callQualityOption(qualityRef.current).bitrate,
       getMic: getMobileMic,
       createPeer: createMobilePeer,
     });
     return controller.current;
   }, [presenceRef]);
+
+  useEffect(() => {
+    let alive = true;
+    readSetting(settingName).then(raw => {
+      if (!alive) return;
+      qualityRef.current = parseCallQuality(raw);
+      setQuality(qualityRef.current);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [settingName]);
 
   useEffect(() => () => {
     controller.current?.hangup();
@@ -67,12 +85,20 @@ export const useVoiceCall = (presenceRef: { current: SignalSender }) => {
     muted,
     speaker,
     peerRecording,
+    quality,
     onSignal: useCallback((signal: CallSignal) => { void get().handleSignal(signal); }, [get]),
     start: () => { void get().start(); },
     accept: () => { void get().accept(); },
     reject: () => get().reject(),
     hangup: () => get().hangup(),
     toggleMute: () => setMuted(get().setMuted(!muted)),
+    /** Ganti ke kualitas berikutnya (berputar); berlaku di panggilan berikutnya. */
+    cycleQuality: () => {
+      if (phase !== 'idle') return;
+      qualityRef.current = nextCallQuality(qualityRef.current);
+      setQuality(qualityRef.current);
+      writeSetting(settingName, qualityRef.current).catch(() => undefined);
+    },
     toggleSpeaker: () => {
       callAudio.setSpeaker(!speaker);
       setSpeaker(!speaker);

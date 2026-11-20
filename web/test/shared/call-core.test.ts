@@ -203,3 +203,41 @@ describe('call-core: rekaman', () => {
     expect(a.ctl.localStream()).toBeNull()
   })
 })
+
+describe('call-core: kualitas suara', () => {
+  it('menetapkan maxBitrate pengirim sesuai pilihan saat peer dibuat dan saat tersambung', async () => {
+    const setParameters = vi.fn(async () => undefined)
+    const sender = { getParameters: () => ({}) as { encodings?: { maxBitrate?: number }[] }, setParameters }
+    const peers: FakePeer[] = []
+    const ctl = createCallController({
+      myId: 'alice',
+      send: () => undefined,
+      onPhase: () => undefined,
+      onRemoteStream: () => undefined,
+      onEnd: () => undefined,
+      newCallId: () => 'call-1',
+      getBitrate: () => 128_000,
+      getMic: async () => fakeMic().stream,
+      createPeer: () => {
+        const p = Object.assign(new FakePeer(), { getSenders: () => [sender] })
+        peers.push(p)
+        return p as unknown as PeerLike
+      },
+    })
+    await ctl.start()
+    await ctl.handleSignal({ type: 'accept', callId: 'call-1', from: 'bob' })
+    expect(setParameters).toHaveBeenCalledWith({ encodings: [{ maxBitrate: 128_000 }] })
+    setParameters.mockClear()
+    peers[0].connect('connected')
+    await flush()
+    expect(setParameters).toHaveBeenCalledTimes(1)
+  })
+
+  it('tanpa getBitrate tidak menyentuh parameter pengirim', async () => {
+    const { a, b } = pair()
+    await a.ctl.start()
+    await b.ctl.accept()
+    await flush()
+    expect(a.peers[0].setParameters).toBeUndefined()
+  })
+})

@@ -75,6 +75,7 @@ import { notifyMessageSent } from '../lib/notify';
 import { onVoiceState, pauseVoice, playVoice, resumeVoice, stopVoice, type VoiceState } from '../lib/audio';
 import { Button } from '../components/Button';
 import { CallBar } from '../components/CallBar';
+import { callQualityOption } from '../../../web/shared/call-quality-core';
 import { useVoiceCall } from '../lib/useVoiceCall';
 import { ScheduleSheet } from '../components/ScheduleSheet';
 import { MenuItem, PopupMenu } from '../components/PopupMenu';
@@ -145,7 +146,7 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
   const [replyingTo, setReplyingTo] = useState<Bubble | null>(null);
   const [peerPresence, setPeerPresence] = useState<PeerPresence>({ online: false, typing: false });
   const presenceRef = useRef<ReturnType<typeof openConversationPresence>>(null);
-  const voiceCall = useVoiceCall(presenceRef);
+  const voiceCall = useVoiceCall(presenceRef, conversation.id);
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
@@ -1090,6 +1091,10 @@ export const ChatScreen = ({ conversation: initial, onBack }: Props) => {
         <MenuItem
           label={radarOn ? 'Matikan Siaran Dekat' : 'Nyalakan Siaran Dekat (tanpa internet)'}
           onPress={() => closeMenuThen(toggleRadar)}
+        />
+        <MenuItem
+          label={`Kualitas suara telepon: ${callQualityOption(voiceCall.quality).label}`}
+          onPress={voiceCall.cycleQuality}
         />
         <MenuItem label="Hapus riwayat chat di HP ini" onPress={() => closeMenuThen(confirmClearChat)} />
         <MenuItem
