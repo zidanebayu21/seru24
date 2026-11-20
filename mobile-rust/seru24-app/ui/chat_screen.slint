@@ -1,0 +1,828 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { BubbleItem, PinItem, ScheduledItem, SearchHitItem } from "types.slint";
+import { Avatar, CallBar, MessageBubble, PillButton } from "components.slint";
+
+export component ChatScreen inherits Rectangle {
+    in property <string> peer-name;
+    in property <string> peer-username;
+    in property <string> peer-initials;
+    in property <color> peer-avatar-color: Theme.accent;
+    in property <bool> peer-online: false;
+    in property <bool> peer-typing: false;
+    in property <bool> peer-near: false;
+    in property <bool> radar-on: false;
+    in property <bool> incoming-request: false;
+    in property <bool> peer-blocked: false;
+    in property <bool> key-changed: false;
+    in property <string> safety-code: "";
+    in property <string> call-quality-label: "Standar · 32 kbps";
+    in property <bool> has-older: false;
+    in property <bool> loading-older: false;
+    in property <[BubbleItem]> messages;
+    in property <[PinItem]> pins;
+    in property <[ScheduledItem]> scheduled;
+    in property <[SearchHitItem]> search-hits;
+    in property <string> reply-target-snippet: "";
+    in property <string> error: "";
+
+    in property <string> call-phase: "idle";
+    in property <string> call-note: "";
+    in property <bool> call-muted: false;
+    in property <bool> call-speaker: false;
+    in property <bool> call-peer-recording: false;
+
+    in property <length> safe-top: 0px;
+    in property <length> safe-bottom: 0px;
+    in-out property <string> draft;
+    in-out property <string> search-query;
+    in-out property <string> schedule-clock: "20.00";
+    in-out property <string> selected-key: "";
+    in-out property <bool> search-open: false;
+    in-out property <bool> pins-expanded: false;
+    in-out property <bool> menu-open: false;
+    in-out property <bool> schedule-open: false;
+    in-out property <bool> confirm-clear: false;
+    in-out property <string> schedule-error: "";
+
+    callback back();
+    callback load-older();
+    callback send-message(string);
+    callback draft-edited(string);
+    callback attach-file();
+    callback reply-message(string);
+    callback cancel-reply();
+    callback pin-toggle(string);
+    callback delete-message(string);
+    callback file-action(string);
+    callback accept-request();
+    callback toggle-block();
+    callback trust-new-key();
+    callback clear-local-chat();
+    callback toggle-radar();
+    callback search-local-messages(string);
+    callback jump-to-message(string);
+    callback schedule-preset(int);
+    callback schedule-clock-submit(string);
+    callback cancel-scheduled(string);
+    callback cycle-call-quality();
+
+    callback call-start();
+    callback call-accept();
+    callback call-reject();
+    callback call-hangup();
+    callback call-toggle-mute();
+    callback call-toggle-speaker();
+
+    public function scroll-to-bottom() {
+        if (root.messages.length > 0) {
+            msgs-list.ensure-row-visible(root.messages.length - 1, ScrollBehavior.instant);
+        }
+    }
+
+    public function scroll-to-row(row: int) {
+        if (row >= 0 && row < root.messages.length) {
+            msgs-list.ensure-row-visible(row, ScrollBehavior.smooth);
+        }
+    }
+
+    background: Theme.bg;
+
+    VerticalLayout {
+        // Header persis RN (ChatScreen.tsx): ‹ | Avatar | Name+Subtitle | Telepon | Cari | ⋮
+        Rectangle {
+            height: 60px + root.safe-top;
+            background: Theme.surface;
+
+            HorizontalLayout {
+                padding-top: root.safe-top;
+                padding-left: 6px;
+                padding-right: 10px;
+                spacing: 6px;
+                alignment: start;
+
+                Rectangle {
+                    width: 32px;
+                    TouchArea { clicked => { root.back(); } }
+                    Text {
+                        text: "‹";
+                        color: Theme.text;
+                        font-size: 32px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    Avatar {
+                        initials: root.peer-initials;
+                        bg: root.peer-avatar-color;
+                        size: 40px;
+                    }
+                }
+
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    alignment: center;
+                    spacing: 2px;
+                    padding-left: 4px;
+
+                    Text {
+                        text: root.peer-name;
+                        color: Theme.text;
+                        font-size: 16px;
+                        font-weight: 700;
+                        overflow: elide;
+                    }
+
+                    Text {
+                        text: root.peer-near ? "tersambung langsung · tanpa internet" :
+                              root.peer-typing ? "sedang mengetik…" :
+                              (root.peer-online ? "@" + root.peer-username + " · online" : "@" + root.peer-username + " · terenkripsi end-to-end");
+                        color: root.peer-typing || root.peer-near ? Theme.accent : Theme.muted;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                    }
+                }
+
+                Rectangle {
+                    width: tel-txt.preferred-width + 12px;
+                    opacity: root.peer-online && root.call-phase == "idle" ? 1.0 : 0.4;
+                    TouchArea {
+                        enabled: root.peer-online && root.call-phase == "idle";
+                        clicked => { root.call-start(); }
+                    }
+                    tel-txt := Text {
+                        text: "Telepon";
+                        color: Theme.accent;
+                        font-size: 14px;
+                        font-weight: 600;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Rectangle {
+                    width: cari-txt.preferred-width + 12px;
+                    TouchArea {
+                        clicked => { root.search-open = !root.search-open; }
+                    }
+                    cari-txt := Text {
+                        text: "Cari";
+                        color: Theme.accent;
+                        font-size: 14px;
+                        font-weight: 600;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Rectangle {
+                    width: 28px;
+                    TouchArea {
+                        clicked => {
+                            root.confirm-clear = false;
+                            root.menu-open = !root.menu-open;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 3.5px;
+                        HorizontalLayout { alignment: center; Rectangle { width: 3.5px; height: 3.5px; border-radius: 2px; background: Theme.text; } }
+                        HorizontalLayout { alignment: center; Rectangle { width: 3.5px; height: 3.5px; border-radius: 2px; background: Theme.text; } }
+                        HorizontalLayout { alignment: center; Rectangle { width: 3.5px; height: 3.5px; border-radius: 2px; background: Theme.text; } }
+                    }
+                }
+            }
+
+            Rectangle {
+                y: parent.height - 1px;
+                width: parent.width;
+                height: 1px;
+                background: Theme.border;
+            }
+        }
+
+        CallBar {
+            phase: root.call-phase;
+            note: root.call-note;
+            muted: root.call-muted;
+            speaker: root.call-speaker;
+            peer-recording: root.call-peer-recording;
+            accept => { root.call-accept(); }
+            reject => { root.call-reject(); }
+            hangup => { root.call-hangup(); }
+            toggle-mute => { root.call-toggle-mute(); }
+            toggle-speaker => { root.call-toggle-speaker(); }
+        }
+
+        if root.key-changed : Rectangle {
+            background: Theme.warn-bg;
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+                Text {
+                    text: "Kunci enkripsi lawan bicara berubah. Cocokkan kode keamanan: " + root.safety-code;
+                    color: Theme.text;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                }
+                PillButton {
+                    height: 34px;
+                    label: "Saya sudah cocokkan";
+                    clicked => { root.trust-new-key(); }
+                }
+            }
+        }
+
+        if root.incoming-request : Rectangle {
+            background: Theme.warn-bg;
+            HorizontalLayout {
+                padding: 12px;
+                spacing: 8px;
+                Text {
+                    text: "@" + root.peer-username + " ingin mengirim pesan.";
+                    color: Theme.text;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    wrap: word-wrap;
+                }
+                PillButton {
+                    height: 34px;
+                    label: "Terima";
+                    primary: true;
+                    clicked => { root.accept-request(); }
+                }
+                PillButton {
+                    height: 34px;
+                    label: "Blokir";
+                    danger: true;
+                    clicked => { root.toggle-block(); }
+                }
+            }
+        }
+
+        if root.pins.length > 0 : Rectangle {
+            background: Theme.surface;
+            VerticalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                padding-top: 6px;
+                padding-bottom: 6px;
+                spacing: 4px;
+                Rectangle {
+                    height: 30px;
+                    TouchArea {
+                        clicked => { root.pins-expanded = !root.pins-expanded; }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: "📌 " + root.pins[0].snippet;
+                            color: Theme.text;
+                            font-size: 13px;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: root.pins.length + "/3 " + (root.pins-expanded ? "▲" : "▼");
+                            color: Theme.muted;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                if root.pins-expanded : VerticalLayout {
+                    spacing: 4px;
+                    for p in root.pins : HorizontalLayout {
+                        spacing: 6px;
+                        Text {
+                            text: p.time-label + " · " + p.snippet;
+                            color: Theme.text;
+                            font-size: 13px;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                        }
+                        PillButton {
+                            height: 26px;
+                            label: "×";
+                            clicked => { root.pin-toggle(p.key); }
+                        }
+                    }
+                }
+            }
+        }
+
+        if root.search-open : Rectangle {
+            background: Theme.surface;
+            VerticalLayout {
+                padding: 10px;
+                spacing: 6px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        height: 40px;
+                        border-radius: 10px;
+                        background: Theme.bg;
+                        border-width: 1px;
+                        border-color: Theme.border;
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            TextInput {
+                                text <=> root.search-query;
+                                color: Theme.text;
+                                font-size: 14px;
+                                vertical-alignment: center;
+                                edited => { root.search-local-messages(root.search-query); }
+                            }
+                        }
+                        if root.search-query == "" : Text {
+                            x: 12px;
+                            text: "Cari di percakapan ini";
+                            color: Theme.muted;
+                            font-size: 14px;
+                            vertical-alignment: center;
+                            height: parent.height;
+                        }
+                    }
+                    PillButton {
+                        height: 40px;
+                        label: "Tutup";
+                        clicked => { root.search-open = false; }
+                    }
+                }
+                Text {
+                    text: "Pencarian hanya di HP ini; tidak memakai server.";
+                    color: Theme.muted;
+                    font-size: 12px;
+                }
+                for hit in root.search-hits : Rectangle {
+                    min-height: hit-row.preferred-height + 8px;
+                    border-radius: 8px;
+                    background: hit-touch.pressed ? Theme.day-chip-bg : transparent;
+                    hit-touch := TouchArea {
+                        clicked => {
+                            root.search-open = false;
+                            root.jump-to-message(hit.key);
+                        }
+                    }
+                    hit-row := HorizontalLayout {
+                        padding-left: 4px;
+                        padding-right: 4px;
+                        padding-top: 4px;
+                        padding-bottom: 4px;
+                        spacing: 8px;
+                        Text {
+                            text: hit.time-label;
+                            color: Theme.muted;
+                            font-size: 12px;
+                            width: 48px;
+                        }
+                        Text {
+                            text: hit.before + "[" + hit.match-text + "]" + hit.after;
+                            color: Theme.text;
+                            font-size: 13px;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        if root.error != "" : Text {
+            text: root.error;
+            color: Theme.danger;
+            font-size: 13px;
+            horizontal-alignment: center;
+        }
+
+        if root.has-older : HorizontalLayout {
+            padding: 6px;
+            alignment: center;
+            PillButton {
+                height: 32px;
+                label: root.loading-older ? "Memuat…" : "Muat pesan lebih lama";
+                enabled: !root.loading-older;
+                clicked => { root.load-older(); }
+            }
+        }
+
+        msgs-list := ListView {
+            vertical-stretch: 1;
+            for msg in root.messages : MessageBubble {
+                item: msg;
+                max-bubble-width: max(180px, root.width - 76px);
+                selected: root.selected-key == msg.key;
+                tapped => {
+                    root.selected-key = root.selected-key == msg.key ? "" : msg.key;
+                }
+                reply-clicked => {
+                    root.reply-message(msg.key);
+                    root.selected-key = "";
+                }
+                pin-clicked => {
+                    root.pin-toggle(msg.key);
+                    root.selected-key = "";
+                }
+                delete-clicked => {
+                    root.delete-message(msg.key);
+                    root.selected-key = "";
+                }
+                file-clicked => {
+                    root.file-action(msg.key);
+                }
+            }
+        }
+
+        if root.scheduled.length > 0 : Rectangle {
+            background: Theme.surface;
+            VerticalLayout {
+                padding: 8px;
+                spacing: 4px;
+                for s in root.scheduled : HorizontalLayout {
+                    spacing: 6px;
+                    Text {
+                        text: s.when-label;
+                        color: s.failed ? Theme.danger : Theme.accent;
+                        font-size: 12px;
+                        font-weight: 600;
+                    }
+                    Text {
+                        text: s.text;
+                        color: Theme.muted;
+                        font-size: 12px;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                    PillButton {
+                        height: 24px;
+                        label: "×";
+                        clicked => { root.cancel-scheduled(s.id); }
+                    }
+                }
+            }
+        }
+
+        if root.schedule-open : Rectangle {
+            background: Theme.surface;
+            border-width: 1px;
+            border-color: Theme.border;
+            VerticalLayout {
+                padding: 10px;
+                spacing: 6px;
+                Text {
+                    text: "Jadwalkan pesan";
+                    color: Theme.text;
+                    font-size: 13px;
+                    font-weight: 700;
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    PillButton {
+                        height: 32px;
+                        label: "1 jam";
+                        clicked => {
+                            root.schedule-preset(0);
+                            root.schedule-open = false;
+                        }
+                    }
+                    PillButton {
+                        height: 32px;
+                        label: "Malam 20.00";
+                        clicked => {
+                            root.schedule-preset(1);
+                            root.schedule-open = false;
+                        }
+                    }
+                    PillButton {
+                        height: 32px;
+                        label: "Besok 08.00";
+                        clicked => {
+                            root.schedule-preset(2);
+                            root.schedule-open = false;
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        height: 38px;
+                        border-radius: 10px;
+                        background: Theme.bg;
+                        border-width: 1px;
+                        border-color: Theme.border;
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            TextInput {
+                                text <=> root.schedule-clock;
+                                color: Theme.text;
+                                font-size: 14px;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                    PillButton {
+                        height: 38px;
+                        label: "Jadwalkan";
+                        primary: true;
+                        clicked => { root.schedule-clock-submit(root.schedule-clock); }
+                    }
+                    PillButton {
+                        height: 38px;
+                        label: "Batal";
+                        clicked => { root.schedule-open = false; }
+                    }
+                }
+                if root.schedule-error != "" : Text {
+                    text: root.schedule-error;
+                    color: Theme.danger;
+                    font-size: 12px;
+                }
+            }
+        }
+
+        if root.reply-target-snippet != "" : Rectangle {
+            background: Theme.surface;
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 10px;
+                padding-top: 6px;
+                padding-bottom: 4px;
+                spacing: 8px;
+                Text {
+                    text: "Membalas: " + root.reply-target-snippet;
+                    color: Theme.accent;
+                    font-size: 12px;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: "×";
+                    color: Theme.muted;
+                    font-size: 20px;
+                    vertical-alignment: center;
+                    TouchArea { clicked => { root.cancel-reply(); } }
+                }
+            }
+        }
+
+        // Pill Composer persis RN (ChatScreen.tsx:1408)
+        Rectangle {
+            height: 62px + root.safe-bottom;
+            background: Theme.bg;
+
+            VerticalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                padding-top: 6px;
+                padding-bottom: 8px + root.safe-bottom;
+
+                Rectangle {
+                    height: 48px;
+                    border-radius: 24px;
+                    background: Theme.surface;
+                    border-width: 1px;
+                    border-color: Theme.border;
+
+                    HorizontalLayout {
+                        padding-left: 4px;
+                        padding-right: 4px;
+                        spacing: 4px;
+                        alignment: stretch;
+
+                        Rectangle {
+                            width: 40px;
+                            height: 40px;
+                            y: 3px;
+                            border-radius: 20px;
+                            opacity: root.peer-blocked ? 0.4 : 1.0;
+                            TouchArea {
+                                enabled: !root.peer-blocked;
+                                clicked => { root.attach-file(); }
+                            }
+                            Text {
+                                text: "+";
+                                color: Theme.muted;
+                                font-size: 24px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            HorizontalLayout {
+                                padding-left: 4px;
+                                padding-right: 4px;
+                                TextInput {
+                                    text <=> root.draft;
+                                    color: Theme.text;
+                                    font-size: 16px;
+                                    enabled: !root.peer-blocked;
+                                    vertical-alignment: center;
+                                    edited => { root.draft-edited(root.draft); }
+                                    accepted => { root.send-message(root.draft); }
+                                }
+                            }
+                            if root.draft == "" : Text {
+                                x: 4px;
+                                text: root.peer-blocked ? "Anda memblokir pengguna ini" : "Tulis pesan";
+                                color: Theme.muted;
+                                font-size: 16px;
+                                vertical-alignment: center;
+                                height: parent.height;
+                            }
+                        }
+
+                        if root.draft != "" && !root.peer-blocked : Rectangle {
+                            width: 34px;
+                            height: 40px;
+                            y: 3px;
+                            TouchArea {
+                                clicked => { root.schedule-open = !root.schedule-open; }
+                            }
+                            Text {
+                                text: "⏰";
+                                font-size: 16px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        Rectangle {
+                            width: 40px;
+                            height: 40px;
+                            y: 3px;
+                            border-radius: 20px;
+                            background: Theme.accent;
+                            opacity: root.draft != "" && !root.peer-blocked ? 1.0 : 0.4;
+                            TouchArea {
+                                enabled: root.draft != "" && !root.peer-blocked;
+                                clicked => { root.send-message(root.draft); }
+                            }
+                            Text {
+                                text: "↑";
+                                color: Theme.accent-text;
+                                font-size: 19px;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Popup menu ⋮ melayang di pojok kanan atas persis PopupMenu.tsx
+    if root.menu-open : Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: #00000030;
+
+        TouchArea {
+            clicked => {
+                root.confirm-clear = false;
+                root.menu-open = false;
+            }
+        }
+
+        Rectangle {
+            x: parent.width - self.width - 14px;
+            y: root.safe-top + 56px;
+            width: min(285px, parent.width - 28px);
+            height: chat-menu-col.preferred-height + 16px;
+            border-radius: 12px;
+            background: Theme.surface;
+            border-width: 1px;
+            border-color: Theme.border;
+
+            TouchArea {}
+
+            chat-menu-col := VerticalLayout {
+                padding: 8px;
+                spacing: 4px;
+
+                if root.safety-code != "" : VerticalLayout {
+                    padding: 8px;
+                    spacing: 2px;
+                    Text {
+                        text: "Kode keamanan";
+                        color: Theme.muted;
+                        font-size: 11px;
+                    }
+                    Text {
+                        text: root.safety-code;
+                        color: Theme.text;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                    }
+                }
+
+                if root.safety-code != "" : Rectangle {
+                    height: 1px;
+                    background: Theme.border;
+                }
+
+                Rectangle {
+                    height: 40px;
+                    border-radius: 8px;
+                    background: ta-radar.pressed ? Theme.day-chip-bg : transparent;
+                    ta-radar := TouchArea {
+                        clicked => {
+                            root.toggle-radar();
+                            root.menu-open = false;
+                        }
+                    }
+                    Text {
+                        x: 10px;
+                        width: parent.width - 20px;
+                        text: root.radar-on ? "Matikan Siaran Dekat" : "Nyalakan Siaran Dekat";
+                        color: Theme.text;
+                        font-size: 14px;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Rectangle {
+                    height: 40px;
+                    border-radius: 8px;
+                    background: ta-qual.pressed ? Theme.day-chip-bg : transparent;
+                    ta-qual := TouchArea {
+                        clicked => { root.cycle-call-quality(); }
+                    }
+                    Text {
+                        x: 10px;
+                        width: parent.width - 20px;
+                        text: "Suara telepon: " + root.call-quality-label;
+                        color: Theme.text;
+                        font-size: 14px;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+
+                Rectangle {
+                    height: 1px;
+                    background: Theme.border;
+                }
+
+                Rectangle {
+                    height: 40px;
+                    border-radius: 8px;
+                    background: ta-clear.pressed ? Theme.day-chip-bg : transparent;
+                    ta-clear := TouchArea {
+                        clicked => {
+                            if (root.confirm-clear) {
+                                root.confirm-clear = false;
+                                root.clear-local-chat();
+                                root.menu-open = false;
+                            } else {
+                                root.confirm-clear = true;
+                            }
+                        }
+                    }
+                    Text {
+                        x: 10px;
+                        width: parent.width - 20px;
+                        text: root.confirm-clear ? "Yakin hapus riwayat chat ini?" : "Hapus riwayat chat di HP ini";
+                        color: root.confirm-clear ? Theme.danger : Theme.text;
+                        font-size: 14px;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Rectangle {
+                    height: 40px;
+                    border-radius: 8px;
+                    background: ta-block.pressed ? Theme.day-chip-bg : transparent;
+                    ta-block := TouchArea {
+                        clicked => {
+                            root.toggle-block();
+                            root.menu-open = false;
+                        }
+                    }
+                    Text {
+                        x: 10px;
+                        width: parent.width - 20px;
+                        text: root.peer-blocked ? "Buka blokir" : "Blokir pengguna";
+                        color: root.peer-blocked ? Theme.text : Theme.danger;
+                        font-size: 14px;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}

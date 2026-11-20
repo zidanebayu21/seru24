@@ -1,0 +1,95 @@
+[package]
+name = "seru24-app"
+version = "0.1.3"
+edition = "2021"
+license = "GPL-3.0-only"
+description = "Klien Android seru24 berbasis Rust + Slint"
+
+[lib]
+name = "seru24_app"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "seru24-app"
+path = "src/main.rs"
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+serde_json = "1"
+seru24-core = { path = "../seru24-core" }
+slint = { version = "1.19", default-features = false, features = ["compat-1-2", "unstable-fontique-012"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
+zeroize = "1"
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.22"
+ndk-context = "0.1"
+slint = { version = "1.19", default-features = false, features = ["backend-android-activity-06", "compat-1-2"] }
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+slint = { version = "1.19", default-features = false, features = ["backend-winit", "accessibility", "compat-1-2", "renderer-femtovg"] }
+
+[build-dependencies]
+slint-build = "1.19"
+
+[package.metadata.android]
+package = "id.seru24.chat.rust"
+apk_name = "seru24-rust"
+build_targets = ["aarch64-linux-android", "x86_64-linux-android"]
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.INTERNET"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.ACCESS_NETWORK_STATE"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.POST_NOTIFICATIONS"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.RECORD_AUDIO"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.MODIFY_AUDIO_SETTINGS"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.BLUETOOTH"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.BLUETOOTH_ADMIN"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.BLUETOOTH_ADVERTISE"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.BLUETOOTH_CONNECT"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.BLUETOOTH_SCAN"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.ACCESS_FINE_LOCATION"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.NEARBY_WIFI_DEVICES"
+
+[package.metadata.android.sdk]
+min_sdk_version = 29
+target_sdk_version = 36
+
+[package.metadata.android.application]
+label = "seru24 Rust"
+
+[[package.metadata.android.application.activity]]
+name = "android.app.NativeActivity"
+window_soft_input_mode = "adjustResize"
+config_changes = "keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+exported = true
+
+[[package.metadata.android.application.activity.meta_data]]
+name = "android.app.lib_name"
+value = "seru24_app"
+
+[[package.metadata.android.application.activity.intent_filter]]
+actions = ["android.intent.action.MAIN"]
+categories = ["android.intent.category.LAUNCHER"]

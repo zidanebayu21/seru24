@@ -1,0 +1,407 @@
+import { Theme } from "theme.slint";
+import {
+    BubbleItem,
+    ChatItem,
+    FoundUserItem,
+    NearbyMsgItem,
+    NearbyPeerItem,
+    PinItem,
+    ScheduledItem,
+    SearchHitItem,
+} from "types.slint";
+import { AuthScreen } from "auth_screen.slint";
+import { ChatListScreen } from "chat_list.slint";
+import { ChatScreen } from "chat_screen.slint";
+import { AccountMenuOverlay } from "account_screen.slint";
+import { NearbyScreen } from "nearby_screen.slint";
+import { NearbyChatScreen } from "nearby_chat_screen.slint";
+
+export { Theme }
+
+export component MainWindow inherits Window {
+    title: "seru24";
+    preferred-width: 400px;
+    preferred-height: 760px;
+    background: Theme.bg;
+
+    in-out property <string> screen: "loading";
+
+    // Auth props
+    in-out property <bool> auth-busy: false;
+    in-out property <string> auth-error: "";
+    in-out property <string> auth-notice: "";
+    in-out property <bool> auth-register-mode: false;
+    in-out property <string> auth-identifier: "";
+    in-out property <string> auth-email: "";
+    in-out property <string> auth-username: "";
+    in-out property <string> auth-display-name: "";
+    in-out property <string> auth-password: "";
+    in-out property <string> auth-confirm: "";
+
+    // ChatList props
+    in-out property <string> my-display-name: "";
+    in-out property <string> my-username: "";
+    in-out property <string> my-initials: "24";
+    in-out property <color> my-avatar-color: Theme.accent;
+    in-out property <bool> offline: false;
+    in-out property <bool> syncing: false;
+    in-out property <bool> has-more-chats: false;
+    in-out property <bool> loading-more-chats: false;
+    in-out property <bool> standby-enabled: false;
+    in-out property <bool> search-busy: false;
+    in-out property <bool> has-found: false;
+    in-out property <bool> searched-none: false;
+    in-out property <FoundUserItem> found-user;
+    in-out property <string> list-error: "";
+    in-out property <int> nearby-badge: 0;
+    in-out property <string> update-label: "";
+    in-out property <string> update-status: "";
+    in-out property <string> search-query: "";
+    in-out property <[ChatItem]> chats;
+
+    // ChatScreen props
+    in-out property <string> active-peer-name: "";
+    in-out property <string> active-peer-username: "";
+    in-out property <string> active-peer-initials: "";
+    in-out property <color> active-peer-avatar-color: Theme.accent;
+    in-out property <bool> peer-online: false;
+    in-out property <bool> peer-typing: false;
+    in-out property <bool> peer-near: false;
+    in-out property <bool> active-incoming-request: false;
+    in-out property <bool> active-peer-blocked: false;
+    in-out property <bool> key-changed: false;
+    in-out property <string> safety-code: "";
+    in-out property <string> call-quality-label: "Standar · 32 kbps";
+    in-out property <bool> has-older: false;
+    in-out property <bool> loading-older: false;
+    in-out property <[BubbleItem]> messages;
+    in-out property <[PinItem]> pins;
+    in-out property <[ScheduledItem]> scheduled;
+    in-out property <[SearchHitItem]> search-hits;
+    in-out property <string> reply-target-snippet: "";
+    in-out property <string> chat-error: "";
+    in-out property <string> draft: "";
+    in-out property <string> chat-search-query: "";
+    in-out property <string> selected-bubble-key: "";
+    in-out property <string> schedule-error: "";
+    in-out property <string> call-phase: "idle";
+    in-out property <string> call-note: "";
+    in-out property <bool> call-muted: false;
+    in-out property <bool> call-speaker: false;
+    in-out property <bool> call-peer-recording: false;
+
+    // AccountScreen / AccountMenuOverlay props
+    in-out property <bool> account-menu-open: false;
+    in-out property <string> storage-stats: "0 percakapan · 0 pesan";
+    in-out property <string> account-notice: "";
+    in-out property <string> account-error: "";
+    in-out property <bool> notify-enabled: false;
+    in-out property <bool> account-busy: false;
+    in-out property <string> profile-name-draft: "";
+    in-out property <string> old-password: "";
+    in-out property <string> new-password: "";
+
+    // Nearby props
+    in-out property <bool> radar-on: false;
+    in-out property <bool> radar-supported: true;
+    in-out property <string> nearby-warning: "";
+    in-out property <string> nearby-error: "";
+    in-out property <[NearbyPeerItem]> nearby-peers;
+    in-out property <string> nearby-peer-username: "";
+    in-out property <bool> nearby-connected: false;
+    in-out property <bool> nearby-key-warning: false;
+    in-out property <string> nearby-chat-error: "";
+    in-out property <[NearbyMsgItem]> nearby-messages;
+    in-out property <string> nearby-draft: "";
+
+    private property <length> safe-top: root.safe-area-insets.top;
+    private property <length> safe-bottom: max(root.safe-area-insets.bottom, root.virtual-keyboard-size.height);
+    private property <length> safe-left: root.safe-area-insets.left;
+    private property <length> safe-right: root.safe-area-insets.right;
+
+    init => {
+        Theme.sync-palette();
+    }
+
+    public function scroll-chat-to-bottom() {
+        chat-screen.scroll-to-bottom();
+    }
+
+    public function scroll-chat-to-row(row: int) {
+        chat-screen.scroll-to-row(row);
+    }
+
+    // Callbacks Auth
+    callback submit-login();
+    callback submit-register();
+    callback open-forgot-password();
+
+    // Callbacks ChatList
+    callback search-changed(string);
+    callback search-username(string);
+    callback start-chat-with(string);
+    callback open-chat(ChatItem);
+    callback open-account();
+    callback open-nearby();
+    callback toggle-standby(bool);
+    callback load-more-chats();
+    callback install-update();
+    callback open-update-link();
+
+    // Callbacks ChatScreen
+    callback back-to-list();
+    callback load-older();
+    callback send-message(string);
+    callback draft-edited(string);
+    callback attach-file();
+    callback reply-message(string);
+    callback cancel-reply();
+    callback pin-toggle(string);
+    callback delete-message(string);
+    callback file-action(string);
+    callback accept-request();
+    callback toggle-block();
+    callback trust-new-key();
+    callback clear-local-chat();
+    callback search-local-messages(string);
+    callback jump-to-message(string);
+    callback schedule-preset(int);
+    callback schedule-clock-submit(string);
+    callback cancel-scheduled(string);
+    callback cycle-call-quality();
+
+    // Callbacks Voice Call
+    callback call-start();
+    callback call-accept();
+    callback call-reject();
+    callback call-hangup();
+    callback call-toggle-mute();
+    callback call-toggle-speaker();
+
+    // Callbacks Account
+    callback save-profile(string);
+    callback export-backup();
+    callback import-backup();
+    callback clear-cache();
+    callback reset-full-db();
+    callback change-password();
+    callback toggle-notify(bool);
+    callback sign-out();
+
+    // Callbacks Nearby
+    callback toggle-radar(bool);
+    callback connect-nearby-peer(string);
+    callback accept-nearby-peer(string);
+    callback reject-nearby-peer(string);
+    callback open-nearby-chat(NearbyPeerItem);
+    callback send-nearby-message(string);
+
+    if root.screen == "loading" : Rectangle {
+        x: root.safe-left;
+        width: root.width - root.safe-left - root.safe-right;
+        height: root.height;
+        background: Theme.bg;
+        VerticalLayout {
+            alignment: center;
+            spacing: 12px;
+            Text {
+                text: "seru24";
+                color: Theme.accent;
+                font-size: 30px;
+                font-weight: 800;
+                horizontal-alignment: center;
+            }
+            Text {
+                text: "Memulihkan sesi & kunci terenkripsi…";
+                color: Theme.muted;
+                font-size: 13px;
+                horizontal-alignment: center;
+            }
+        }
+    }
+
+    if root.screen == "auth" : AuthScreen {
+        x: root.safe-left;
+        width: root.width - root.safe-left - root.safe-right;
+        height: root.height;
+        safe-top: root.safe-top;
+        safe-bottom: root.safe-bottom;
+        busy: root.auth-busy;
+        error <=> root.auth-error;
+        notice: root.auth-notice;
+        register-mode <=> root.auth-register-mode;
+        identifier <=> root.auth-identifier;
+        email <=> root.auth-email;
+        username <=> root.auth-username;
+        display-name <=> root.auth-display-name;
+        password <=> root.auth-password;
+        confirm <=> root.auth-confirm;
+        submit-login => { root.submit-login(); }
+        submit-register => { root.submit-register(); }
+        open-forgot-password => { root.open-forgot-password(); }
+    }
+
+    if root.screen == "chat_list" : ChatListScreen {
+        x: root.safe-left;
+        width: root.width - root.safe-left - root.safe-right;
+        height: root.height;
+        safe-top: root.safe-top;
+        safe-bottom: root.safe-bottom;
+        my-initials: root.my-initials;
+        my-avatar-color: root.my-avatar-color;
+        offline: root.offline;
+        syncing: root.syncing;
+        has-more: root.has-more-chats;
+        loading-more: root.loading-more-chats;
+        radar-on: root.radar-on;
+        standby-on: root.standby-enabled;
+        search-busy: root.search-busy;
+        has-found: root.has-found;
+        searched-none: root.searched-none;
+        found-user: root.found-user;
+        status-error: root.list-error;
+        nearby-badge: root.nearby-badge;
+        update-label: root.update-label;
+        update-status: root.update-status;
+        chats: root.chats;
+        query <=> root.search-query;
+        search-changed(q) => { root.search-changed(q); }
+        search-username(u) => { root.search-username(u); }
+        start-chat-with(id) => { root.start-chat-with(id); }
+        open-chat(c) => { root.open-chat(c); }
+        open-account => { root.open-account(); }
+        open-nearby => { root.open-nearby(); }
+        toggle-radar(on) => { root.toggle-radar(on); }
+        toggle-standby(on) => { root.toggle-standby(on); }
+        load-more => { root.load-more-chats(); }
+        install-update => { root.install-update(); }
+        open-update-link => { root.open-update-link(); }
+    }
+
+    chat-screen := ChatScreen {
+        visible: root.screen == "chat";
+        x: root.safe-left;
+        width: root.width - root.safe-left - root.safe-right;
+        height: root.height;
+        safe-top: root.safe-top;
+        safe-bottom: root.safe-bottom;
+        peer-name: root.active-peer-name;
+        peer-username: root.active-peer-username;
+        peer-initials: root.active-peer-initials;
+        peer-avatar-color: root.active-peer-avatar-color;
+        peer-online: root.peer-online;
+        peer-typing: root.peer-typing;
+        peer-near: root.peer-near;
+        radar-on: root.radar-on;
+        incoming-request: root.active-incoming-request;
+        peer-blocked: root.active-peer-blocked;
+        key-changed: root.key-changed;
+        safety-code: root.safety-code;
+        call-quality-label: root.call-quality-label;
+        has-older: root.has-older;
+        loading-older: root.loading-older;
+        messages: root.messages;
+        pins: root.pins;
+        scheduled: root.scheduled;
+        search-hits: root.search-hits;
+        reply-target-snippet: root.reply-target-snippet;
+        error: root.chat-error;
+        call-phase: root.call-phase;
+        call-note: root.call-note;
+        call-muted: root.call-muted;
+        call-speaker: root.call-speaker;
+        call-peer-recording: root.call-peer-recording;
+        draft <=> root.draft;
+        search-query <=> root.chat-search-query;
+        selected-key <=> root.selected-bubble-key;
+        schedule-error <=> root.schedule-error;
+        back => { root.back-to-list(); }
+        load-older => { root.load-older(); }
+        send-message(t) => { root.send-message(t); }
+        draft-edited(t) => { root.draft-edited(t); }
+        attach-file => { root.attach-file(); }
+        reply-message(k) => { root.reply-message(k); }
+        cancel-reply => { root.cancel-reply(); }
+        pin-toggle(k) => { root.pin-toggle(k); }
+        delete-message(k) => { root.delete-message(k); }
+        file-action(k) => { root.file-action(k); }
+        accept-request => { root.accept-request(); }
+        toggle-block => { root.toggle-block(); }
+        trust-new-key => { root.trust-new-key(); }
+        clear-local-chat => { root.clear-local-chat(); }
+        toggle-radar => { root.toggle-radar(!root.radar-on); }
+        search-local-messages(q) => { root.search-local-messages(q); }
+        jump-to-message(k) => { root.jump-to-message(k); }
+        schedule-preset(i) => { root.schedule-preset(i); }
+        schedule-clock-submit(c) => { root.schedule-clock-submit(c); }
+        cancel-scheduled(id) => { root.cancel-scheduled(id); }
+        cycle-call-quality => { root.cycle-call-quality(); }
+        call-start => { root.call-start(); }
+        call-accept => { root.call-accept(); }
+        call-reject => { root.call-reject(); }
+        call-hangup => { root.call-hangup(); }
+        call-toggle-mute => { root.call-toggle-mute(); }
+        call-toggle-speaker => { root.call-toggle-speaker(); }
+    }
+
+    if root.account-menu-open : AccountMenuOverlay {
+        x: root.safe-left;
+        width: root.width - root.safe-left - root.safe-right;
+        height: root.height;
+        safe-top: root.safe-top;
+        display-name: root.my-display-name;
+        username: root.my-username;
+        storage-stats: root.storage-stats;
+        notice: root.account-notice;
+        error: root.account-error;
+        notify-enabled: root.notify-enabled;
+        busy: root.account-busy;
+        profile-name-draft <=> root.profile-name-draft;
+        old-password <=> root.old-password;
+        new-password <=> root.new-password;
+        close => { root.account-menu-open = false; }
+        save-profile(n) => { root.save-profile(n); }
+        export-backup => { root.export-backup(); }
+        import-backup => { root.import-backup(); }
+        clear-cache => { root.clear-cache(); }
+        reset-full-db => { root.reset-full-db(); }
+        change-password => { root.change-password(); }
+        toggle-notify(v) => { root.toggle-notify(v); }
+        sign-out => { root.sign-out(); }
+    }
+
+    if root.screen == "nearby" : NearbyScreen {
+        x: root.safe-left;
+        width: root.width - root.safe-left - root.safe-right;
+        height: root.height;
+        safe-top: root.safe-top;
+        safe-bottom: root.safe-bottom;
+        radar-on: root.radar-on;
+        radar-supported: root.radar-supported;
+        warning: root.nearby-warning;
+        error: root.nearby-error;
+        peers: root.nearby-peers;
+        back => { root.back-to-list(); }
+        toggle-radar(on) => { root.toggle-radar(on); }
+        connect-peer(id) => { root.connect-nearby-peer(id); }
+        accept-peer(id) => { root.accept-nearby-peer(id); }
+        reject-peer(id) => { root.reject-nearby-peer(id); }
+        open-peer-chat(p) => { root.open-nearby-chat(p); }
+    }
+
+    if root.screen == "nearby_chat" : NearbyChatScreen {
+        x: root.safe-left;
+        width: root.width - root.safe-left - root.safe-right;
+        height: root.height;
+        safe-top: root.safe-top;
+        safe-bottom: root.safe-bottom;
+        peer-username: root.nearby-peer-username;
+        connected: root.nearby-connected;
+        key-warning: root.nearby-key-warning;
+        error: root.nearby-chat-error;
+        messages: root.nearby-messages;
+        draft <=> root.nearby-draft;
+        back => { root.open-nearby(); }
+        send(t) => { root.send-nearby-message(t); }
+    }
+}

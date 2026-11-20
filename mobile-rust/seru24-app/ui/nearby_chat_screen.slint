@@ -1,0 +1,176 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { NearbyMsgItem } from "types.slint";
+
+export component NearbyChatScreen inherits Rectangle {
+    in property <length> safe-top: 0px;
+    in property <length> safe-bottom: 0px;
+    in property <string> peer-username: "";
+    in property <bool> connected: false;
+    in property <bool> key-warning: false;
+    in property <string> error: "";
+    in property <[NearbyMsgItem]> messages;
+    in-out property <string> draft: "";
+
+    callback back();
+    callback send(string);
+
+    background: Theme.bg;
+
+    VerticalLayout {
+        Rectangle {
+            height: 60px + root.safe-top;
+            background: Theme.surface;
+            HorizontalLayout {
+                padding-top: root.safe-top;
+                padding-left: 10px;
+                padding-right: 10px;
+                spacing: 10px;
+                Rectangle {
+                    width: 32px;
+                    TouchArea { clicked => { root.back(); } }
+                    Text {
+                        text: "‹";
+                        color: Theme.text;
+                        font-size: 32px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    alignment: center;
+                    Text {
+                        text: "@" + root.peer-username;
+                        color: Theme.text;
+                        font-size: 16px;
+                        font-weight: 700;
+                    }
+                    Text {
+                        text: root.connected ? "tersambung langsung · tanpa internet" : "tidak tersambung · tersimpan di HP";
+                        color: root.connected ? Theme.accent : Theme.muted;
+                        font-size: 12px;
+                    }
+                }
+            }
+        }
+
+        if root.key-warning : Rectangle {
+            background: Theme.warn-bg;
+            VerticalLayout {
+                padding: 8px;
+                Text {
+                    text: "Kunci enkripsi berbeda dari server. Cocokkan kode keamanan secara lisan.";
+                    color: Theme.text;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        ListView {
+            vertical-stretch: 1;
+            for msg in root.messages : HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                padding-top: 4px;
+                padding-bottom: 4px;
+                if msg.mine : Rectangle { horizontal-stretch: 1; }
+                Rectangle {
+                    horizontal-stretch: 0;
+                    max-width: max(180px, root.width - 76px);
+                    border-radius: 14px;
+                    background: msg.mine ? Theme.mine : Theme.surface;
+                    border-width: msg.mine ? 0px : 1px;
+                    border-color: Theme.border;
+                    VerticalLayout {
+                        padding: 10px;
+                        spacing: 3px;
+                        Text {
+                            text: msg.text;
+                            color: Theme.text;
+                            font-size: 15px;
+                            wrap: word-wrap;
+                        }
+                        Text {
+                            text: msg.status;
+                            color: Theme.muted;
+                            font-size: 11px;
+                            horizontal-alignment: right;
+                        }
+                    }
+                }
+                if !msg.mine : Rectangle { horizontal-stretch: 1; }
+            }
+        }
+
+        if root.error != "" : Text {
+            text: root.error;
+            color: Theme.danger;
+            font-size: 12px;
+            horizontal-alignment: center;
+        }
+
+        Rectangle {
+            height: 62px + root.safe-bottom;
+            background: Theme.bg;
+            VerticalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                padding-top: 6px;
+                padding-bottom: 8px + root.safe-bottom;
+                Rectangle {
+                    height: 48px;
+                    border-radius: 24px;
+                    background: Theme.surface;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 4px;
+                        spacing: 6px;
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            TextInput {
+                                width: parent.width;
+                                height: parent.height;
+                                text <=> root.draft;
+                                color: Theme.text;
+                                font-size: 16px;
+                                vertical-alignment: center;
+                                accepted => { root.send(root.draft); }
+                            }
+                            if root.draft == "" : Text {
+                                text: "Tulis pesan (Siaran Dekat)";
+                                color: Theme.muted;
+                                font-size: 15px;
+                                vertical-alignment: center;
+                                height: parent.height;
+                            }
+                        }
+                        Rectangle {
+                            width: 40px;
+                            height: 40px;
+                            y: 3px;
+                            border-radius: 20px;
+                            background: Theme.accent;
+                            opacity: root.draft != "" ? 1.0 : 0.4;
+                            TouchArea {
+                                enabled: root.draft != "";
+                                clicked => { root.send(root.draft); }
+                            }
+                            Text {
+                                text: "↑";
+                                color: Theme.accent-text;
+                                font-size: 19px;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

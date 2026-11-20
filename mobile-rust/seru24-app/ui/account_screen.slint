@@ -1,0 +1,362 @@
+import { Theme } from "theme.slint";
+import { NavSwitch, PillButton } from "components.slint";
+
+component MenuRow inherits Rectangle {
+    in property <string> label;
+    in property <bool> danger: false;
+    callback clicked();
+
+    height: 42px;
+    border-radius: 8px;
+    background: row-touch.pressed ? Theme.day-chip-bg : transparent;
+
+    row-touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    Text {
+        x: 10px;
+        width: parent.width - 20px;
+        text: root.label;
+        color: root.danger ? Theme.danger : Theme.text;
+        font-size: 14px;
+        vertical-alignment: center;
+    }
+}
+
+component ThemeChip inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected: false;
+    callback clicked();
+
+    height: 28px;
+    width: chip-txt.preferred-width + 20px;
+    border-radius: 14px;
+    background: root.selected ? Theme.accent : Theme.surface;
+    border-width: 1px;
+    border-color: root.selected ? Theme.accent : Theme.border;
+
+    chip-txt := Text {
+        text: root.label;
+        color: root.selected ? Theme.accent-text : Theme.text;
+        font-size: 12px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// Popup menu melayang di pojok kanan atas persis `AccountMenu.tsx` + `PopupMenu.tsx`
+export component AccountMenuOverlay inherits Rectangle {
+    in property <length> safe-top: 0px;
+    in property <string> display-name: "";
+    in property <string> username: "";
+    in property <string> app-version: "0.1.3";
+    in property <string> storage-stats: "0 percakapan · 0 pesan";
+    in property <string> notice: "";
+    in property <string> error: "";
+    in property <bool> notify-enabled: false;
+    in property <bool> busy: false;
+
+    in-out property <string> profile-name-draft: "";
+    in-out property <string> old-password: "";
+    in-out property <string> new-password: "";
+    in-out property <bool> edit-profile-open: false;
+    in-out property <bool> change-pw-open: false;
+    in-out property <bool> confirm-reset-db: false;
+
+    callback close();
+    callback save-profile(string);
+    callback export-backup();
+    callback import-backup();
+    callback clear-cache();
+    callback reset-full-db();
+    callback change-password();
+    callback toggle-notify(bool);
+    callback sign-out();
+
+    background: #00000030;
+
+    TouchArea {
+        clicked => {
+            root.confirm-reset-db = false;
+            root.close();
+        }
+    }
+
+    Rectangle {
+        x: parent.width - self.width - 14px;
+        y: root.safe-top + 56px;
+        width: min(310px, parent.width - 28px);
+        height: min(card-body.preferred-height + 12px, parent.height - root.safe-top - 80px);
+        border-radius: 12px;
+        background: Theme.surface;
+        border-width: 1px;
+        border-color: Theme.border;
+        clip: true;
+
+        // Cegah klik di dalam kartu menutup menu
+        TouchArea {}
+
+        Flickable {
+            width: parent.width;
+            height: parent.height;
+            content-height: card-body.preferred-height + 12px;
+
+            card-body := VerticalLayout {
+                width: parent.width;
+                padding: 6px;
+                spacing: 2px;
+
+                VerticalLayout {
+                    padding: 10px;
+                    spacing: 2px;
+                    Text {
+                        text: root.display-name != "" ? root.display-name : "@" + root.username;
+                        color: Theme.text;
+                        font-size: 15px;
+                        font-weight: 700;
+                    }
+                    Text {
+                        text: "@" + root.username;
+                        color: Theme.muted;
+                        font-size: 13px;
+                    }
+                    Text {
+                        text: "seru24 Android v" + root.app-version + " (Rust)";
+                        color: Theme.muted;
+                        font-size: 11px;
+                    }
+                }
+
+                Rectangle { height: 1px; background: Theme.border; }
+
+                MenuRow {
+                    label: "Edit profil";
+                    clicked => {
+                        root.edit-profile-open = !root.edit-profile-open;
+                        root.change-pw-open = false;
+                    }
+                }
+
+                if root.edit-profile-open : VerticalLayout {
+                    padding: 8px;
+                    spacing: 6px;
+                    Rectangle {
+                        height: 40px;
+                        border-radius: 10px;
+                        background: Theme.bg;
+                        border-width: 1px;
+                        border-color: Theme.border;
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            TextInput {
+                                text <=> root.profile-name-draft;
+                                color: Theme.text;
+                                font-size: 14px;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                    PillButton {
+                        height: 36px;
+                        label: root.busy ? "Menyimpan…" : "Simpan profil";
+                        primary: true;
+                        enabled: !root.busy;
+                        clicked => { root.save-profile(root.profile-name-draft); }
+                    }
+                }
+
+                MenuRow {
+                    label: "Ganti password";
+                    clicked => {
+                        root.change-pw-open = !root.change-pw-open;
+                        root.edit-profile-open = false;
+                    }
+                }
+
+                if root.change-pw-open : VerticalLayout {
+                    padding: 8px;
+                    spacing: 6px;
+                    Rectangle {
+                        height: 38px;
+                        border-radius: 10px;
+                        background: Theme.bg;
+                        border-width: 1px;
+                        border-color: Theme.border;
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            TextInput {
+                                text <=> root.old-password;
+                                color: Theme.text;
+                                font-size: 13px;
+                                input-type: InputType.password;
+                                vertical-alignment: center;
+                            }
+                        }
+                        if root.old-password == "" : Text {
+                            x: 10px;
+                            text: "Password lama";
+                            color: Theme.muted;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                            height: parent.height;
+                        }
+                    }
+                    Rectangle {
+                        height: 38px;
+                        border-radius: 10px;
+                        background: Theme.bg;
+                        border-width: 1px;
+                        border-color: Theme.border;
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            TextInput {
+                                text <=> root.new-password;
+                                color: Theme.text;
+                                font-size: 13px;
+                                input-type: InputType.password;
+                                vertical-alignment: center;
+                            }
+                        }
+                        if root.new-password == "" : Text {
+                            x: 10px;
+                            text: "Password baru (min 12)";
+                            color: Theme.muted;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                            height: parent.height;
+                        }
+                    }
+                    PillButton {
+                        height: 36px;
+                        label: root.busy ? "Menyimpan…" : "Simpan password";
+                        primary: true;
+                        enabled: !root.busy;
+                        clicked => { root.change-password(); }
+                    }
+                }
+
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    height: 42px;
+                    Text {
+                        text: "Notifikasi";
+                        color: Theme.text;
+                        font-size: 14px;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        NavSwitch {
+                            checked: root.notify-enabled;
+                            toggled(v) => { root.toggle-notify(v); }
+                        }
+                    }
+                }
+
+                VerticalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    padding-top: 4px;
+                    padding-bottom: 8px;
+                    spacing: 6px;
+                    Text {
+                        text: "Tema";
+                        color: Theme.muted;
+                        font-size: 12px;
+                    }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        ThemeChip {
+                            label: "Sistem";
+                            selected: Theme.pref == "system";
+                            clicked => { Theme.set-mode("system"); }
+                        }
+                        ThemeChip {
+                            label: "Terang";
+                            selected: Theme.pref == "light";
+                            clicked => { Theme.set-mode("light"); }
+                        }
+                        ThemeChip {
+                            label: "Gelap";
+                            selected: Theme.pref == "dark";
+                            clicked => { Theme.set-mode("dark"); }
+                        }
+                        ThemeChip {
+                            label: "Coklat";
+                            selected: Theme.pref == "brown";
+                            clicked => { Theme.set-mode("brown"); }
+                        }
+                    }
+                }
+
+                Rectangle { height: 1px; background: Theme.border; }
+
+                VerticalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    padding-top: 6px;
+                    padding-bottom: 4px;
+                    spacing: 2px;
+                    Text {
+                        text: "DB Lokal: " + root.storage-stats;
+                        color: Theme.muted;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                    }
+                    if root.notice != "" : Text {
+                        text: root.notice;
+                        color: Theme.accent;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                    }
+                    if root.error != "" : Text {
+                        text: root.error;
+                        color: Theme.danger;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                    }
+                }
+
+                MenuRow {
+                    label: "Ekspor riwayat ke file (.txt)";
+                    clicked => { root.export-backup(); }
+                }
+                MenuRow {
+                    label: "Impor riwayat dari file";
+                    clicked => { root.import-backup(); }
+                }
+                MenuRow {
+                    label: "Bersihkan chat lokal";
+                    clicked => { root.clear-cache(); }
+                }
+                MenuRow {
+                    label: root.confirm-reset-db ? "Ketuk lagi: konfirmasi reset DB chat" : "Reset penuh DB chat";
+                    danger: true;
+                    clicked => {
+                        if (root.confirm-reset-db) {
+                            root.confirm-reset-db = false;
+                            root.reset-full-db();
+                        } else {
+                            root.confirm-reset-db = true;
+                        }
+                    }
+                }
+                MenuRow {
+                    label: "Keluar";
+                    danger: true;
+                    clicked => { root.sign-out(); }
+                }
+            }
+        }
+    }
+}

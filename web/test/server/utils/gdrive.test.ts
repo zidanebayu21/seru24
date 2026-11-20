@@ -4,6 +4,7 @@ import {
   downloadRange,
   driveConfig,
   driveQuota,
+  findApkRelease,
   receivedFromRange,
   uploadChunk,
 } from '../../../server/utils/gdrive'
@@ -86,5 +87,48 @@ describe('server gdrive utils', () => {
     } as any)
 
     await expect(deleteDriveFile(config, 'file-123')).resolves.toBeUndefined()
+  })
+
+  it('membedakan pencarian rilis APK react dan rust di Drive', async () => {
+    const config = { clientId: 'c', clientSecret: 's', refreshToken: 'r' }
+    const fakeId = '1AbCdEfGhIjKlMnOp_qrs-TUV'
+    const sha = 'a'.repeat(64)
+    const calls: string[] = []
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      calls.push(url)
+      if (url.includes('oauth2.googleapis.com')) {
+        return { ok: true, json: async () => ({ access_token: 'tok-apk', expires_in: 3600 }) } as any
+      }
+      const isRust = decodeURIComponent(url).includes('android_rust_apk')
+      return {
+        ok: true,
+        json: async () => ({
+          files: [{
+            id: fakeId,
+            size: isRust ? '16340999' : '16898781',
+            modifiedTime: '2026-11-20T09:00:00.000Z',
+            appProperties: {
+              seru24_kind: isRust ? 'android_rust_apk' : 'android_apk',
+              version_code: isRust ? '2' : '25',
+              version_name: isRust ? '0.1.2' : '1.25',
+              sha256: sha,
+            },
+          }],
+        }),
+      } as any
+    })
+
+    const rustRel = await findApkRelease(config, 'rust')
+    expect(rustRel?.variant).toBe('rust')
+    expect(rustRel?.versionCode).toBe(2)
+
+    const reactRel = await findApkRelease(config)
+    expect(reactRel?.variant).toBeUndefined()
+    expect(reactRel?.versionCode).toBe(25)
+
+    const searchUrls = calls.filter((u) => u.includes('/drive/v3/files'))
+    expect(decodeURIComponent(searchUrls[0] ?? '')).toContain('android_rust_apk')
+    expect(decodeURIComponent(searchUrls[1] ?? '')).toContain('android_apk')
   })
 })

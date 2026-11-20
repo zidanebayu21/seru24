@@ -4,7 +4,7 @@
  * Kredensial OAuth hanya di env server (NUXT_GDRIVE_*), tidak pernah dikirim ke browser (OWASP ASVS V2.10.4).
  */
 import type { H3Event } from 'h3'
-import { driveLinks, parseAppRelease, type AppRelease } from '#shared/app-release'
+import { driveLinks, parseAppRelease, type AppRelease, type AppVariant } from '#shared/app-release'
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const API = 'https://www.googleapis.com/drive/v3'
@@ -145,8 +145,9 @@ export const downloadRange = async (
   return new Uint8Array(await res.arrayBuffer())
 }
 
-/** Penanda file APK rilis di Drive (appProperties), diisi release_apk.ps1. */
+/** Penanda file APK rilis di Drive (appProperties), diisi release_apk.ps1 / mobile-rust/release_apk.ps1. */
 export const APK_KIND_PROPERTY = { key: 'seru24_kind', value: 'android_apk' } as const
+export const APK_RUST_KIND_PROPERTY = { key: 'seru24_kind', value: 'android_rust_apk' } as const
 
 /** Pemakaian ruang akun Drive penyimpanan (byte); limit null bila tanpa batas. */
 export const driveQuota = async (config: DriveConfig): Promise<{ usage: number; limit: number | null }> => {
@@ -156,15 +157,16 @@ export const driveQuota = async (config: DriveConfig): Promise<{ usage: number; 
   return { usage: Number(quota.usage ?? 0), limit: quota.limit ? Number(quota.limit) : null }
 }
 
-/** APK Android terbaru di Drive akun penyimpanan; null bila belum pernah dirilis. */
-export const findApkRelease = async (config: DriveConfig): Promise<AppRelease | null> => {
-  const q = `appProperties has { key='${APK_KIND_PROPERTY.key}' and value='${APK_KIND_PROPERTY.value}' } and trashed = false`
+/** APK Android terbaru di Drive akun penyimpanan sesuai varian ('react' = seru24.apk, 'rust' = seru24-rust.apk). */
+export const findApkRelease = async (config: DriveConfig, variant: AppVariant = 'react'): Promise<AppRelease | null> => {
+  const kind = variant === 'rust' ? APK_RUST_KIND_PROPERTY : APK_KIND_PROPERTY
+  const q = `appProperties has { key='${kind.key}' and value='${kind.value}' } and trashed = false`
   const fields = 'files(id,size,modifiedTime,appProperties)'
   const res = await driveFetch(config, `${API}/files?${new URLSearchParams({ q, fields, pageSize: '1', orderBy: 'modifiedTime desc' })}`)
   if (!res.ok) throw await failure(res, 'cari APK')
   const file = ((await res.json()) as {
-    files: Array<{ id: string; size?: string; modifiedTime?: string; appProperties?: Record<string, string> }>
-  }).files[0]
+    files?: Array<{ id: string; size?: string; modifiedTime?: string; appProperties?: Record<string, string> }>
+  }).files?.[0]
   if (!file) return null
   return parseAppRelease({
     versionCode: Number(file.appProperties?.version_code),
@@ -173,6 +175,7 @@ export const findApkRelease = async (config: DriveConfig): Promise<AppRelease | 
     sha256: file.appProperties?.sha256,
     sizeBytes: Number(file.size ?? 0),
     updatedAt: file.modifiedTime ?? '',
+    ...(variant === 'rust' ? { variant: 'rust' } : {}),
   })
 }
 

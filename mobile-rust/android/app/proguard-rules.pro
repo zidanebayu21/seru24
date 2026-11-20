@@ -1,0 +1,4 @@
+-dontwarn org.webrtc.Dav1dDecoder$Natives
+-keep class id.seru24.chat.rust.NativeBridge { *; }
+-keep class id.seru24.chat.rust.Seru24Activity { *; }
+-keep class id.seru24.chat.rust.Seru24FcmService { *; }

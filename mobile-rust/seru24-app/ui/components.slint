@@ -1,0 +1,598 @@
+import { Theme } from "theme.slint";
+import { BubbleItem, ChatItem } from "types.slint";
+
+export component Avatar inherits Rectangle {
+    in property <string> initials;
+    in property <color> bg: Theme.accent;
+    in property <length> size: 46px;
+
+    width: root.size;
+    height: root.size;
+    border-radius: root.size / 2;
+    background: root.bg;
+
+    Text {
+        text: root.initials;
+        color: #ffffff;
+        font-size: root.size * 0.36;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+export component NavSwitch inherits Rectangle {
+    in property <bool> checked: false;
+    callback toggled(bool);
+
+    width: 40px;
+    height: 24px;
+    border-radius: 12px;
+    background: root.checked ? Theme.accent : Theme.border;
+
+    Rectangle {
+        x: root.checked ? parent.width - self.width - 3px : 3px;
+        y: (parent.height - self.height) / 2;
+        width: 18px;
+        height: 18px;
+        border-radius: 9px;
+        background: #ffffff;
+        animate x { duration: 120ms; }
+    }
+
+    TouchArea {
+        clicked => {
+            root.toggled(!root.checked);
+        }
+    }
+}
+
+export component PillButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> primary: false;
+    in property <bool> danger: false;
+    in property <bool> accent-outline: false;
+    in property <bool> enabled: true;
+    in property <length> radius: 12px;
+    callback clicked();
+
+    height: 42px;
+    border-radius: root.radius;
+    background: root.primary ? Theme.accent : Theme.surface;
+    border-width: root.primary ? 0px : 1px;
+    border-color: Theme.border;
+    opacity: root.enabled ? 1.0 : 0.45;
+    min-width: label-text.preferred-width + 26px;
+
+    label-text := Text {
+        text: root.label;
+        color: root.primary ? Theme.accent-text : (root.danger ? Theme.danger : (root.accent-outline ? Theme.accent : Theme.text));
+        font-size: 14px;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+export component LabeledField inherits VerticalLayout {
+    in property <string> label;
+    in property <string> placeholder;
+    in property <InputType> input-type: InputType.text;
+    in-out property <string> value;
+    callback submitted();
+
+    spacing: 4px;
+
+    Text {
+        text: root.label;
+        color: Theme.muted;
+        font-size: 13px;
+    }
+
+    Rectangle {
+        height: 46px;
+        border-radius: 12px;
+        background: Theme.surface;
+        border-width: 1px;
+        border-color: Theme.border;
+
+        HorizontalLayout {
+            padding-left: 14px;
+            padding-right: 14px;
+            TextInput {
+                text <=> root.value;
+                color: Theme.text;
+                font-size: 15px;
+                input-type: root.input-type;
+                vertical-alignment: center;
+                accepted => {
+                    root.submitted();
+                }
+            }
+        }
+
+        if root.value == "" : Text {
+            x: 14px;
+            text: root.placeholder;
+            color: Theme.muted;
+            font-size: 15px;
+            vertical-alignment: center;
+            height: parent.height;
+        }
+    }
+}
+
+export component CallBar inherits Rectangle {
+    in property <string> phase: "idle";
+    in property <string> note: "";
+    in property <bool> muted: false;
+    in property <bool> speaker: false;
+    in property <bool> peer-recording: false;
+
+    callback accept();
+    callback reject();
+    callback hangup();
+    callback toggle-mute();
+    callback toggle-speaker();
+
+    visible: root.phase != "idle" || root.note != "";
+    height: (root.phase != "idle" || root.note != "") ? layout.preferred-height : 0px;
+    background: Theme.surface;
+
+    layout := VerticalLayout {
+        padding: (root.phase != "idle" || root.note != "") ? 10px : 0px;
+        spacing: 8px;
+
+        if root.phase == "idle" && root.note != "" : Text {
+            text: root.note;
+            color: Theme.muted;
+            font-size: 12px;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+
+        if root.phase != "idle" : HorizontalLayout {
+            spacing: 8px;
+            alignment: space-between;
+
+            Text {
+                text: root.phase == "calling" ? "Memanggil…" :
+                      root.phase == "incoming" ? "Panggilan suara masuk" :
+                      root.phase == "connecting" ? "Menyambungkan…" : "Sedang berbicara";
+                color: Theme.text;
+                font-size: 14px;
+                font-weight: 700;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+
+            if root.phase == "incoming" : PillButton {
+                height: 34px;
+                label: "Terima";
+                primary: true;
+                clicked => { root.accept(); }
+            }
+            if root.phase == "incoming" : PillButton {
+                height: 34px;
+                label: "Tolak";
+                danger: true;
+                clicked => { root.reject(); }
+            }
+            if root.phase == "connected" : PillButton {
+                height: 34px;
+                label: root.muted ? "Bunyikan" : "Bisukan";
+                clicked => { root.toggle-mute(); }
+            }
+            if root.phase == "connected" : PillButton {
+                height: 34px;
+                label: root.speaker ? "Earpiece" : "Speaker";
+                clicked => { root.toggle-speaker(); }
+            }
+            if root.phase != "incoming" : PillButton {
+                height: 34px;
+                label: "Akhiri";
+                danger: true;
+                clicked => { root.hangup(); }
+            }
+        }
+
+        if root.peer-recording : Text {
+            text: "Lawan bicara sedang merekam panggilan ini";
+            color: Theme.danger;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        if root.phase != "idle" || root.note != "" : Rectangle {
+            height: 1px;
+            background: Theme.border;
+        }
+    }
+}
+
+export component ChatRow inherits Rectangle {
+    in property <ChatItem> item;
+    callback clicked();
+
+    height: 76px;
+    background: touch.pressed ? Theme.mine : Theme.bg;
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        spacing: 14px;
+        alignment: stretch;
+
+        VerticalLayout {
+            alignment: center;
+            Avatar {
+                initials: root.item.initials;
+                bg: root.item.avatar-color;
+                size: 52px;
+            }
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 3px;
+
+            HorizontalLayout {
+                spacing: 6px;
+                Text {
+                    text: root.item.name;
+                    color: Theme.text;
+                    font-size: 16px;
+                    font-weight: 600;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+
+                if root.item.incoming-request : Rectangle {
+                    width: req-lbl.preferred-width + 12px;
+                    height: 18px;
+                    border-radius: 9px;
+                    background: Theme.warn-bg;
+                    req-lbl := Text {
+                        text: "Permintaan";
+                        color: Theme.text;
+                        font-size: 10px;
+                        font-weight: 700;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Text {
+                    text: root.item.time;
+                    color: root.item.unread > 0 ? Theme.accent : Theme.muted;
+                    font-size: 12px;
+                    font-weight: root.item.unread > 0 ? 600 : 400;
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    text: root.item.preview;
+                    color: root.item.unread > 0 ? Theme.text : Theme.muted;
+                    font-size: 14px;
+                    font-weight: root.item.unread > 0 ? 600 : 400;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+
+                if root.item.unread > 0 : Rectangle {
+                    width: max(22px, unread-txt.preferred-width + 12px);
+                    height: 22px;
+                    border-radius: 11px;
+                    background: Theme.accent;
+
+                    unread-txt := Text {
+                        text: root.item.unread;
+                        color: Theme.accent-text;
+                        font-size: 12px;
+                        font-weight: 700;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        y: parent.height - 1px;
+        x: 82px;
+        width: parent.width - 98px;
+        height: 1px;
+        background: Theme.border;
+    }
+}
+
+export component MessageBubble inherits VerticalLayout {
+    in property <BubbleItem> item;
+    in property <length> max-bubble-width: 300px;
+    in property <bool> selected: false;
+    in-out property <bool> confirm-delete: false;
+
+    callback tapped();
+    callback reply-clicked();
+    callback pin-clicked();
+    callback delete-clicked();
+    callback file-clicked();
+
+    padding-top: root.item.day-label != "" ? 10px : 3px;
+    padding-bottom: 3px;
+    spacing: 6px;
+
+    if root.item.day-label != "" : HorizontalLayout {
+        alignment: center;
+        padding-top: 4px;
+        padding-bottom: 4px;
+        Rectangle {
+            height: 24px;
+            width: day-text.preferred-width + 24px;
+            border-radius: 12px;
+            background: Theme.day-chip-bg;
+
+            day-text := Text {
+                text: root.item.day-label;
+                color: Theme.muted;
+                font-size: 12px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+
+        if root.item.mine : Rectangle {
+            horizontal-stretch: 1;
+        }
+
+        Rectangle {
+            horizontal-stretch: 0;
+            max-width: root.max-bubble-width;
+            border-radius: 18px;
+            background: root.item.revised ? Theme.revised-bg : (root.item.mine ? Theme.mine : Theme.surface);
+            border-width: root.selected ? 2px : (root.item.failed != "" ? 1.5px : (root.item.mine || root.item.revised ? 0px : 1px));
+            border-color: root.selected ? Theme.accent : (root.item.failed != "" ? Theme.danger : Theme.border);
+
+            TouchArea {
+                clicked => {
+                    root.confirm-delete = false;
+                    root.tapped();
+                }
+            }
+
+            VerticalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                padding-top: 8px;
+                padding-bottom: 7px;
+                spacing: 4px;
+
+                if root.item.revised : Text {
+                    text: "Revisi waktu offline";
+                    color: Theme.danger;
+                    font-size: 11px;
+                    font-weight: 600;
+                }
+
+                if root.item.reply-snippet != "" : Rectangle {
+                    background: Theme.day-chip-bg;
+                    border-radius: 6px;
+                    HorizontalLayout {
+                        spacing: 0px;
+                        Rectangle {
+                            width: 3px;
+                            background: Theme.accent;
+                        }
+                        VerticalLayout {
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            padding-top: 4px;
+                            padding-bottom: 4px;
+                            spacing: 2px;
+                            if root.item.quote-who != "" : Text {
+                                text: root.item.quote-who;
+                                color: Theme.accent;
+                                font-size: 12px;
+                                font-weight: 700;
+                            }
+                            Text {
+                                text: root.item.reply-snippet;
+                                color: Theme.muted;
+                                font-size: 12px;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                }
+
+                if !root.item.is-file || root.item.deleted : Text {
+                    text: root.item.text;
+                    color: root.item.deleted ? Theme.muted : Theme.text;
+                    font-size: 15px;
+                    font-italic: root.item.deleted;
+                    wrap: word-wrap;
+                }
+
+                // Voice note player style (matching ChatScreen.tsx voiceRow)
+                if root.item.is-file && !root.item.deleted && root.item.is-voice : HorizontalLayout {
+                    spacing: 10px;
+                    width: min(220px, root.max-bubble-width - 24px);
+                    Rectangle {
+                        width: 34px;
+                        height: 34px;
+                        border-radius: 17px;
+                        background: Theme.accent;
+                        opacity: root.item.pending ? 0.45 : 1.0;
+                        Text {
+                            text: "▶";
+                            color: Theme.accent-text;
+                            font-size: 13px;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        TouchArea {
+                            enabled: !root.item.pending;
+                            clicked => { root.file-clicked(); }
+                        }
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        y: 15px;
+                        height: 4px;
+                        border-radius: 2px;
+                        background: Theme.border;
+                        Rectangle {
+                            width: root.item.saved-path != "" ? parent.width * 0.35 : 0px;
+                            height: 4px;
+                            border-radius: 2px;
+                            background: Theme.accent;
+                        }
+                    }
+                    Text {
+                        text: root.item.file-size;
+                        color: Theme.muted;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                }
+
+                // Document tile (matching ChatScreen.tsx docTile)
+                if root.item.is-file && !root.item.deleted && !root.item.is-voice : HorizontalLayout {
+                    spacing: 10px;
+                    Rectangle {
+                        width: 42px;
+                        height: 42px;
+                        border-radius: 10px;
+                        background: Theme.day-chip-bg;
+                        Text {
+                            text: root.item.file-ext != "" ? root.item.file-ext : "FILE";
+                            color: Theme.accent;
+                            font-size: 11px;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        spacing: 2px;
+                        Text {
+                            text: root.item.file-name;
+                            color: Theme.text;
+                            font-size: 14px;
+                            font-weight: 600;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: root.item.file-size;
+                            color: Theme.muted;
+                            font-size: 12px;
+                        }
+                    }
+                    PillButton {
+                        height: 30px;
+                        label: root.item.saved-path != "" ? "Buka" : "Unduh";
+                        accent-outline: true;
+                        enabled: !root.item.pending;
+                        clicked => { root.file-clicked(); }
+                    }
+                }
+
+                if root.item.is-file && root.item.progress != "" : Text {
+                    text: root.item.progress;
+                    color: Theme.accent;
+                    font-size: 11px;
+                }
+
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 4px;
+
+                    if root.item.failed != "" : Text {
+                        text: root.item.failed;
+                        color: Theme.danger;
+                        font-size: 11px;
+                    }
+
+                    if root.item.failed == "" : Text {
+                        text: root.item.pending ? "mengirim…" : root.item.time;
+                        color: Theme.muted;
+                        font-size: 11px;
+                    }
+
+                    if root.item.ticks != "" && root.item.failed == "" && !root.item.pending : Text {
+                        text: root.item.ticks;
+                        color: root.item.read ? Theme.accent : Theme.muted;
+                        font-size: 11px;
+                        font-weight: root.item.read ? 700 : 400;
+                    }
+                }
+            }
+        }
+
+        if !root.item.mine : Rectangle {
+            horizontal-stretch: 1;
+        }
+    }
+
+    if root.selected && !root.item.deleted && root.item.server-id != "" : HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 6px;
+        alignment: root.item.mine ? end : start;
+
+        PillButton {
+            height: 30px;
+            label: "Balas";
+            clicked => {
+                root.confirm-delete = false;
+                root.reply-clicked();
+            }
+        }
+        PillButton {
+            height: 30px;
+            label: "Pin";
+            clicked => {
+                root.confirm-delete = false;
+                root.pin-clicked();
+            }
+        }
+        if root.item.mine : PillButton {
+            height: 30px;
+            label: root.confirm-delete ? "Yakin hapus?" : "Hapus";
+            danger: true;
+            clicked => {
+                if (root.confirm-delete) {
+                    root.confirm-delete = false;
+                    root.delete-clicked();
+                } else {
+                    root.confirm-delete = true;
+                }
+            }
+        }
+    }
+}

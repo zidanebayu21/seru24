@@ -25,6 +25,12 @@ describe('app-release', () => {
     expect(parseAppRelease(null)).toBeNull()
   })
 
+  it('menerima varian react dan rust serta menolak varian tidak dikenal', () => {
+    expect(parseAppRelease({ ...release, variant: 'rust' })).toEqual({ ...release, variant: 'rust' })
+    expect(parseAppRelease({ ...release, variant: 'react' })).toEqual({ ...release, variant: 'react' })
+    expect(parseAppRelease({ ...release, variant: 'other' })).toBeNull()
+  })
+
   it('hanya memberi tahu bila versi di server lebih baru', () => {
     expect(isNewerRelease(release, 5)).toBe(true)
     expect(isNewerRelease(release, 6)).toBe(false)

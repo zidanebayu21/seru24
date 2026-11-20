@@ -1,0 +1,57 @@
+import { Palette } from "std-widgets.slint";
+
+// Token warna dari web/shared/theme-core.ts agar tema sistem/terang/gelap/coklat identik dengan RN & web.
+export global Theme {
+    in-out property <string> pref: "system";
+    in-out property <bool> system-dark: false;
+    out property <string> mode: pref == "system" ? (system-dark ? "dark" : "light") : pref;
+    callback mode-changed(string);
+
+    out property <color> bg: mode == "light" ? #f4f5f7 : (mode == "dark" ? #0f1215 : #13100e);
+    out property <color> surface: mode == "light" ? #ffffff : (mode == "dark" ? #181c21 : #221b17);
+    out property <color> text: mode == "light" ? #1c1f24 : (mode == "dark" ? #e7e9ec : #f3ece4);
+    out property <color> muted: mode == "light" ? #646b75 : (mode == "dark" ? #9aa1aa : #a99889);
+    out property <color> border: mode == "light" ? #dde1e6 : (mode == "dark" ? #2a3038 : #3c2f26);
+    out property <color> accent: mode == "light" ? #0f766e : (mode == "dark" ? #2dd4bf : #c87840);
+    out property <color> accent-text: mode == "light" ? #ffffff : (mode == "dark" ? #062a26 : #fffaf5);
+    out property <color> mine: mode == "light" ? #d9f2ee : (mode == "dark" ? #123a35 : #4a2e1c);
+    out property <color> danger: mode == "light" ? #b42318 : (mode == "dark" ? #f97066 : #f87171);
+    out property <color> warn-bg: mode == "light" ? #fff4d6 : (mode == "dark" ? #3a2f12 : #3d2d14);
+    out property <color> revised-bg: mode == "light" ? #ffe0e6 : (mode == "dark" ? #4a2830 : #4d2a28);
+    out property <color> day-chip-bg: mode == "light" ? #e5e8ec : (mode == "dark" ? #222830 : #2c231d);
+
+    public function sync-palette() {
+        Palette.color-scheme = root.mode == "light" ? ColorScheme.light : ColorScheme.dark;
+    }
+
+    public function set-mode(next: string) {
+        root.pref = next;
+        root.sync-palette();
+        root.mode-changed(next);
+    }
+
+    public function cycle-mode() {
+        if (root.pref == "system") {
+            root.set-mode("light");
+        } else if (root.pref == "light") {
+            root.set-mode("dark");
+        } else if (root.pref == "dark") {
+            root.set-mode("brown");
+        } else {
+            root.set-mode("system");
+        }
+    }
+
+    public pure function mode-label() -> string {
+        if (root.pref == "system") {
+            return "Sistem";
+        }
+        if (root.pref == "light") {
+            return "Terang";
+        }
+        if (root.pref == "dark") {
+            return "Gelap";
+        }
+        return "Coklat";
+    }
+}

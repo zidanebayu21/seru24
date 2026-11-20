@@ -1,0 +1,213 @@
+import { Theme } from "theme.slint";
+import { LabeledField, PillButton } from "components.slint";
+
+export component AuthScreen inherits Rectangle {
+    in property <length> safe-top: 0px;
+    in property <length> safe-bottom: 0px;
+    in property <bool> busy: false;
+    in-out property <string> error: "";
+    in property <string> notice: "";
+
+    in-out property <bool> register-mode: false;
+    in-out property <string> identifier: "";
+    in-out property <string> email: "";
+    in-out property <string> username: "";
+    in-out property <string> display-name: "";
+    in-out property <string> password: "";
+    in-out property <string> confirm: "";
+
+    callback submit-login();
+    callback submit-register();
+    callback open-forgot-password();
+
+    background: Theme.bg;
+
+    Flickable {
+        width: parent.width;
+        height: parent.height;
+        content-height: max(parent.height, content.preferred-height);
+
+        content := VerticalLayout {
+            width: parent.width;
+            padding-top: root.safe-top + 20px;
+            padding-bottom: root.safe-bottom + 24px;
+            padding-left: 20px;
+            padding-right: 20px;
+            spacing: 16px;
+            alignment: center;
+
+            HorizontalLayout {
+                spacing: 10px;
+                Rectangle {
+                    width: 40px;
+                    height: 40px;
+                    border-radius: 12px;
+                    background: Theme.accent;
+                    Text {
+                        text: "24";
+                        color: Theme.accent-text;
+                        font-size: 16px;
+                        font-weight: 800;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+                Text {
+                    text: "seru24";
+                    color: Theme.text;
+                    font-size: 20px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+            }
+
+            VerticalLayout {
+                spacing: 4px;
+                Text {
+                    text: root.register-mode ? "Daftar" : "Masuk";
+                    color: Theme.text;
+                    font-size: 26px;
+                    font-weight: 700;
+                }
+                Text {
+                    text: "Obrolan terenkripsi end-to-end yang hanya bisa dibaca kalian berdua.";
+                    color: Theme.muted;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                }
+            }
+
+            if root.notice != "" : Rectangle {
+                border-radius: 10px;
+                background: Theme.warn-bg;
+                HorizontalLayout {
+                    Rectangle { width: 3px; background: Theme.muted; }
+                    VerticalLayout {
+                        padding: 10px;
+                        Text {
+                            text: root.notice;
+                            color: Theme.text;
+                            font-size: 13px;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+            }
+
+            if !root.register-mode : LabeledField {
+                label: "Email atau username";
+                placeholder: "mis. john atau nama@email.com";
+                value <=> root.identifier;
+            }
+
+            if root.register-mode : VerticalLayout {
+                spacing: 12px;
+                LabeledField {
+                    label: "Email";
+                    placeholder: "nama@email.com";
+                    value <=> root.email;
+                }
+                LabeledField {
+                    label: "Username";
+                    placeholder: "mis. zidane_21";
+                    value <=> root.username;
+                }
+                LabeledField {
+                    label: "Nama tampil";
+                    placeholder: "Nama Anda";
+                    value <=> root.display-name;
+                }
+            }
+
+            LabeledField {
+                label: "Password";
+                placeholder: "Minimal 12 karakter";
+                input-type: InputType.password;
+                value <=> root.password;
+                submitted => {
+                    if (!root.register-mode && !root.busy) {
+                        root.submit-login();
+                    }
+                }
+            }
+
+            if root.register-mode : VerticalLayout {
+                spacing: 10px;
+                LabeledField {
+                    label: "Ulangi password";
+                    placeholder: "Ketik ulang password";
+                    input-type: InputType.password;
+                    value <=> root.confirm;
+                }
+                Rectangle {
+                    border-radius: 10px;
+                    background: Theme.warn-bg;
+                    HorizontalLayout {
+                        Rectangle { width: 3px; background: Theme.muted; }
+                        VerticalLayout {
+                            padding: 10px;
+                            Text {
+                                text: "Password ini juga membuka pesan terenkripsi Anda dan tidak pernah dikirim ke server. Jika lupa password, pesan lama tidak bisa dibuka lagi.";
+                                color: Theme.text;
+                                font-size: 12px;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if root.error != "" : Text {
+                text: root.error;
+                color: Theme.danger;
+                font-size: 14px;
+                wrap: word-wrap;
+            }
+
+            PillButton {
+                height: 46px;
+                label: root.busy ? "Memproses…" : (root.register-mode ? "Daftar" : "Masuk");
+                primary: true;
+                enabled: !root.busy;
+                clicked => {
+                    if (root.register-mode) {
+                        root.submit-register();
+                    } else {
+                        root.submit-login();
+                    }
+                }
+            }
+
+            if root.busy : Text {
+                text: "Mengamankan kunci, mohon tunggu…";
+                color: Theme.muted;
+                font-size: 13px;
+                horizontal-alignment: center;
+            }
+
+            HorizontalLayout {
+                spacing: 16px;
+                if !root.register-mode : Text {
+                    text: "Lupa password?";
+                    color: Theme.accent;
+                    font-size: 14px;
+                    TouchArea {
+                        clicked => { root.open-forgot-password(); }
+                    }
+                }
+                Text {
+                    text: root.register-mode ? "Sudah punya akun? Masuk" : "Belum punya akun? Daftar";
+                    color: Theme.accent;
+                    font-size: 14px;
+                    TouchArea {
+                        enabled: !root.busy;
+                        clicked => {
+                            root.error = "";
+                            root.register-mode = !root.register-mode;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

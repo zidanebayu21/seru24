@@ -1,0 +1,142 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { NearbyPeerItem } from "types.slint";
+import { Avatar, PillButton } from "components.slint";
+
+export component NearbyScreen inherits Rectangle {
+    in property <length> safe-top: 0px;
+    in property <length> safe-bottom: 0px;
+    in property <bool> radar-on: false;
+    in property <bool> radar-supported: true;
+    in property <string> warning: "";
+    in property <string> error: "";
+    in property <[NearbyPeerItem]> peers;
+
+    callback back();
+    callback toggle-radar(bool);
+    callback connect-peer(string);
+    callback accept-peer(string);
+    callback reject-peer(string);
+    callback open-peer-chat(NearbyPeerItem);
+
+    background: Theme.bg;
+
+    VerticalLayout {
+        padding-top: root.safe-top + 12px;
+        padding-bottom: root.safe-bottom + 12px;
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 10px;
+
+        HorizontalLayout {
+            spacing: 10px;
+            alignment: space-between;
+            Rectangle {
+                width: 32px;
+                TouchArea { clicked => { root.back(); } }
+                Text {
+                    text: "‹";
+                    color: Theme.text;
+                    font-size: 32px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+            Text {
+                text: "Siaran Dekat";
+                color: Theme.text;
+                font-size: 18px;
+                font-weight: 800;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            PillButton {
+                label: root.radar-on ? "Matikan" : "Aktifkan";
+                primary: root.radar-on;
+                clicked => { root.toggle-radar(!root.radar-on); }
+            }
+        }
+
+        Text {
+            text: root.radar-supported
+                ? "Chat langsung antar HP via Bluetooth/Nearby Connections tanpa internet."
+                : "Siaran Dekat memerlukan Android + Google Play Services (Nearby Connections).";
+            color: Theme.muted;
+            font-size: 12px;
+            wrap: word-wrap;
+        }
+
+        if root.warning != "" : Text {
+            text: root.warning;
+            color: Theme.muted;
+            font-size: 12px;
+            wrap: word-wrap;
+        }
+        if root.error != "" : Text {
+            text: root.error;
+            color: Theme.danger;
+            font-size: 12px;
+            wrap: word-wrap;
+        }
+
+        ListView {
+            vertical-stretch: 1;
+            for peer in root.peers : Rectangle {
+                height: 76px;
+                background: Theme.surface;
+                border-width: 1px;
+                border-color: Theme.border;
+                border-radius: 12px;
+                HorizontalLayout {
+                    padding: 12px;
+                    spacing: 10px;
+                    Avatar {
+                        initials: peer.initials;
+                        bg: peer.avatar-color;
+                        size: 44px;
+                    }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        Text {
+                            text: peer.username != "" ? "@" + peer.username : peer.alias;
+                            color: Theme.text;
+                            font-size: 15px;
+                            font-weight: 700;
+                        }
+                        Text {
+                            text: peer.phase == "ready" ? (peer.trusted ? "Tersambung · terpercaya" : "Tersambung · kode " + peer.code) :
+                                  peer.phase == "incoming" ? "Ingin terhubung" :
+                                  peer.phase == "requesting" ? "Meminta sambungan…" : "Di sekitar";
+                            color: Theme.muted;
+                            font-size: 12px;
+                        }
+                    }
+                    if peer.phase == "found" : PillButton {
+                        label: "Hubungkan";
+                        primary: true;
+                        clicked => { root.connect-peer(peer.endpoint-id); }
+                    }
+                    if peer.phase == "incoming" : HorizontalLayout {
+                        spacing: 6px;
+                        PillButton {
+                            label: "Terima";
+                            primary: true;
+                            clicked => { root.accept-peer(peer.endpoint-id); }
+                        }
+                        PillButton {
+                            label: "Tolak";
+                            danger: true;
+                            clicked => { root.reject-peer(peer.endpoint-id); }
+                        }
+                    }
+                    if peer.phase == "ready" || peer.phase == "history" : PillButton {
+                        label: peer.unread > 0 ? "Buka (" + peer.unread + ")" : "Buka";
+                        primary: true;
+                        clicked => { root.open-peer-chat(peer); }
+                    }
+                }
+            }
+        }
+    }
+}

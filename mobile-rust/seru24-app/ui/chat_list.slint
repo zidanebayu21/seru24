@@ -1,0 +1,316 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { ChatItem, FoundUserItem } from "types.slint";
+import { Avatar, ChatRow, NavSwitch, PillButton } from "components.slint";
+
+export component ChatListScreen inherits Rectangle {
+    in property <[ChatItem]> chats;
+    in property <string> my-initials: "S2";
+    in property <color> my-avatar-color: Theme.accent;
+    in property <bool> offline: false;
+    in property <bool> syncing: false;
+    in property <bool> has-more: false;
+    in property <bool> loading-more: false;
+    in property <bool> radar-on: false;
+    in property <bool> standby-on: false;
+    in property <bool> search-busy: false;
+    in property <bool> has-found: false;
+    in property <bool> searched-none: false;
+    in property <FoundUserItem> found-user;
+    in property <string> status-error: "";
+    in property <int> nearby-badge: 0;
+    in property <string> update-label: "";
+    in property <string> update-status: "";
+    in property <length> safe-top: 0px;
+    in property <length> safe-bottom: 0px;
+    in-out property <string> query;
+
+    callback search-changed(string);
+    callback search-username(string);
+    callback start-chat-with(string);
+    callback open-chat(ChatItem);
+    callback open-account();
+    callback open-nearby();
+    callback toggle-radar(bool);
+    callback toggle-standby(bool);
+    callback load-more();
+    callback install-update();
+    callback open-update-link();
+
+    background: Theme.bg;
+
+    VerticalLayout {
+        padding-top: root.safe-top + 12px;
+        padding-bottom: root.safe-bottom;
+        spacing: 10px;
+
+        // Header persis RN: Chat + syncing | Dekat switch | Standby switch | Avatar
+        HorizontalLayout {
+            padding-left: 16px;
+            padding-right: 16px;
+            spacing: 8px;
+            alignment: space-between;
+
+            HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    text: "Chat";
+                    color: Theme.text;
+                    font-size: 30px;
+                    font-weight: 800;
+                    vertical-alignment: center;
+                }
+                if root.offline : Rectangle {
+                    y: (parent.height - self.height) / 2;
+                    height: 22px;
+                    width: off-lbl.preferred-width + 12px;
+                    border-radius: 11px;
+                    background: Theme.warn-bg;
+                    off-lbl := Text {
+                        text: "Offline";
+                        color: Theme.text;
+                        font-size: 11px;
+                        font-weight: 600;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+                if root.syncing && !root.offline : Text {
+                    text: "Menyinkronkan…";
+                    color: Theme.accent;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 6px;
+
+                HorizontalLayout {
+                    spacing: 4px;
+                    Text {
+                        text: "Dekat";
+                        color: Theme.muted;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        NavSwitch {
+                            checked: root.radar-on;
+                            toggled(on) => { root.toggle-radar(on); }
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 4px;
+                    Text {
+                        text: "Standby";
+                        color: Theme.muted;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        NavSwitch {
+                            checked: root.standby-on;
+                            toggled(on) => { root.toggle-standby(on); }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: 40px;
+                    height: 40px;
+                    TouchArea {
+                        clicked => { root.open-account(); }
+                    }
+                    Avatar {
+                        initials: root.my-initials;
+                        bg: root.my-avatar-color;
+                        size: 40px;
+                    }
+                }
+            }
+        }
+
+        if root.update-label != "" : Rectangle {
+            background: Theme.warn-bg;
+            VerticalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                padding-top: 8px;
+                padding-bottom: 8px;
+                spacing: 6px;
+                Text {
+                    text: root.update-label;
+                    color: Theme.text;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                }
+                if root.update-status != "" : Text {
+                    text: root.update-status;
+                    color: Theme.muted;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    spacing: 12px;
+                    PillButton {
+                        height: 32px;
+                        label: "Perbarui";
+                        primary: true;
+                        clicked => { root.install-update(); }
+                    }
+                    Text {
+                        text: "Buka di Google Drive";
+                        color: Theme.accent;
+                        font-size: 13px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                        TouchArea {
+                            clicked => { root.open-update-link(); }
+                        }
+                    }
+                }
+            }
+        }
+
+        if root.radar-on : Rectangle {
+            background: Theme.warn-bg;
+            TouchArea {
+                clicked => { root.open-nearby(); }
+            }
+            VerticalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                padding-top: 9px;
+                padding-bottom: 9px;
+                Text {
+                    text: "Siaran Dekat aktif" + (root.nearby-badge > 0 ? " · " + root.nearby-badge + " permintaan/pesan baru" : "") + ". Ketuk untuk melihat orang di sekitar.";
+                    color: Theme.text;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        HorizontalLayout {
+            padding-left: 16px;
+            padding-right: 16px;
+            spacing: 8px;
+
+            Rectangle {
+                horizontal-stretch: 1;
+                height: 46px;
+                border-radius: 23px;
+                background: Theme.surface;
+                border-width: 1px;
+                border-color: Theme.border;
+
+                HorizontalLayout {
+                    padding-left: 18px;
+                    padding-right: 14px;
+                    TextInput {
+                        text <=> root.query;
+                        color: Theme.text;
+                        font-size: 15px;
+                        vertical-alignment: center;
+                        edited => { root.search-changed(root.query); }
+                        accepted => { root.search-username(root.query); }
+                    }
+                }
+
+                if root.query == "" : Text {
+                    x: 18px;
+                    text: "Cari username persis, mis. zidane_21";
+                    color: Theme.muted;
+                    font-size: 14px;
+                    vertical-alignment: center;
+                    height: parent.height;
+                }
+            }
+
+            PillButton {
+                height: 46px;
+                label: root.search-busy ? "…" : "Cari";
+                primary: true;
+                enabled: !root.search-busy;
+                clicked => { root.search-username(root.query); }
+            }
+        }
+
+        if root.has-found : Rectangle {
+            background: Theme.surface;
+            border-width: 1px;
+            border-color: Theme.border;
+            border-radius: 14px;
+            HorizontalLayout {
+                padding: 12px;
+                spacing: 10px;
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    Text {
+                        text: root.found-user.display-name != "" ? root.found-user.display-name : "@" + root.found-user.username;
+                        color: Theme.text;
+                        font-size: 15px;
+                        font-weight: 700;
+                    }
+                    Text {
+                        text: "@" + root.found-user.username;
+                        color: Theme.muted;
+                        font-size: 12px;
+                    }
+                }
+                PillButton {
+                    height: 36px;
+                    label: "Chat";
+                    primary: true;
+                    clicked => { root.start-chat-with(root.found-user.id); }
+                }
+            }
+        }
+
+        if root.searched-none : Text {
+            text: "Pengguna tidak ditemukan.";
+            color: Theme.muted;
+            font-size: 13px;
+            horizontal-alignment: center;
+        }
+
+        if root.status-error != "" : Text {
+            text: root.status-error;
+            color: Theme.danger;
+            font-size: 13px;
+            horizontal-alignment: center;
+        }
+
+        if root.chats.length == 0 : Text {
+            text: "Belum ada percakapan. Cari teman dengan username-nya.";
+            color: Theme.muted;
+            font-size: 14px;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+
+        ListView {
+            vertical-stretch: 1;
+            for chat in root.chats : ChatRow {
+                item: chat;
+                clicked => { root.open-chat(chat); }
+            }
+        }
+
+        if root.has-more : HorizontalLayout {
+            padding: 8px;
+            alignment: center;
+            PillButton {
+                height: 36px;
+                label: root.loading-more ? "Memuat…" : "Muat lebih banyak";
+                enabled: !root.loading-more;
+                clicked => { root.load-more(); }
+            }
+        }
+    }
+}

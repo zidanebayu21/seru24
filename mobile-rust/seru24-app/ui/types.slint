@@ -1,0 +1,86 @@
+export struct ChatItem {
+    id: string,
+    name: string,
+    username: string,
+    initials: string,
+    avatar-color: color,
+    preview: string,
+    time: string,
+    unread: int,
+    pinned: bool,
+    incoming-request: bool,
+    blocked: bool,
+}
+
+export struct BubbleItem {
+    key: string,
+    server-id: string,
+    seq: int,
+    mine: bool,
+    text: string,
+    quote-who: string,
+    reply-snippet: string,
+    time: string,
+    ticks: string,
+    read: bool,
+    revised: bool,
+    deleted: bool,
+    pending: bool,
+    failed: string,
+    is-file: bool,
+    is-voice: bool,
+    file-name: string,
+    file-ext: string,
+    file-size: string,
+    progress: string,
+    saved-path: string,
+    day-label: string,
+}
+
+export struct FoundUserItem {
+    id: string,
+    username: string,
+    display-name: string,
+}
+
+export struct ScheduledItem {
+    id: string,
+    when-label: string,
+    text: string,
+    failed: bool,
+}
+
+export struct PinItem {
+    key: string,
+    time-label: string,
+    snippet: string,
+}
+
+export struct SearchHitItem {
+    key: string,
+    seq: int,
+    time-label: string,
+    before: string,
+    match-text: string,
+    after: string,
+}
+
+export struct NearbyPeerItem {
+    endpoint-id: string,
+    alias: string,
+    username: string,
+    initials: string,
+    avatar-color: color,
+    user-id: string,
+    phase: string,
+    trusted: bool,
+    code: string,
+    unread: int,
+}
+
+export struct NearbyMsgItem {
+    id: string,
+    mine: bool,
+    text: string,
+    status: string,
+}
