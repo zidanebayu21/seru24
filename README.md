@@ -2,6 +2,8 @@
 
 Aplikasi secure chat (pesan terenkripsi end-to-end), web + Android.
 
+> **Catatan:** `mobile-rust/` (Rust + Slint) hanya eksperimen. Aplikasinya cepat tetapi masih banyak bug dan belum kompatibel, jadi dihentikan dan dibiarkan apa adanya. Aplikasi Android yang dipakai adalah `mobile/` (React Native).
+
 - `web/` — Nuxt (deploy ke Vercel, root directory: `web`, https://seru24.vercel.app)
 - `web/shared/` — kode bersama web dan mobile: kripto, enkripsi transport, sesi, akun, E2EE, realtime, dokumen
 - `mobile/` — React Native 0.88 tanpa Expo (Android 10+), memakai `web/shared` lewat Metro

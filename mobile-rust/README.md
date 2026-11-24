@@ -1,5 +1,7 @@
 # mobile-rust
 
+> **Status: eksperimen, dihentikan.** Aplikasi Rust + Slint ini **cepat** (ringan dan responsif), tetapi **masih banyak bug dan belum kompatibel** dengan aplikasi utama (izin Android, Nearby, telepon, notifikasi, dan lainnya belum stabil). Tidak dilanjutkan dan dibiarkan apa adanya. Aplikasi yang dipakai dan dirawat tetap `mobile/` (React Native).
+
 Migrasi aplikasi Android seru24 ke Rust + Slint (branch `dev-rust`). Panduan lengkap: `../migraterust.md`.
 Folder `mobile/` (React Native) tidak diubah dan tetap menjadi acuan perilaku.
 
